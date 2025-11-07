@@ -3,7 +3,8 @@ export const TOOL_ALIASES = {
   'clock.now': 'get_current_date',
   'time.now': 'get_current_date',
   'get_time': 'get_current_date',
-  'js.run_sandbox': 'js.run_sandbox'
+  'js.run_sandbox': 'js.run_sandbox',
+  'math.aggregate': 'math.aggregate'
 };
 
 export const TIME_INTENT_KEYWORDS = [

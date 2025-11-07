@@ -1,4 +1,5 @@
 import { sanitizeSandboxArgs, runSandboxSnippet } from './sandboxRunner.js';
+import { sanitizeAggregateArgs, aggregateNumbers } from './mathAggregate.js';
 
 export function createToolRegistry() {
   return {
@@ -23,6 +24,17 @@ export function createToolRegistry() {
       },
       async run(payload) {
         return runSandboxSnippet(payload);
+      }
+    },
+    'math.aggregate': {
+      label: 'math.aggregate',
+      prepareInput(planEntry) {
+        return sanitizeAggregateArgs(planEntry?.args);
+      },
+      async run(payload) {
+        return {
+          value: aggregateNumbers(payload)
+        };
       }
     }
   };

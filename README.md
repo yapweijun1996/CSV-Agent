@@ -12,7 +12,7 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
   - `state/sessionState.js` – Turn bookkeeping + `toolRuns` mutations.
   - `ui/*.js` – View-specific controllers (`chatView`, `thinkingLog`, `toolPlanPanel`, `toolDetailsDrawer`, `summaryBar`, `settingsModal`, `resizer`).
   - `tools/planExecutor.js` – Multi-step plan runner with save-as registry, variable resolver, telemetry logging.
-  - `tools/registry.js` & `tools/sandboxRunner.js` – Tool definitions and secure worker harness.
+  - `tools/registry.js`, `tools/mathAggregate.js`, `tools/sandboxRunner.js` – Tool definitions (clock, sandbox, math aggregate) plus the secure worker harness.
   - `utils/*.js` – Shared helpers (DOM, perf, JSON repair, template hydration, deep-path access, text formatting).
 - `context.md` – Live notebook containing the current goal/TODO/notes/progress for the engineering session.
 - `AGENTS.md` – Product rules and operating instructions the agent must follow.
@@ -22,12 +22,12 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 1. **Diagnose** – `handleSend()` captures the user's question, logs it in chat, clears the thinking panel, and disables inputs so only one action runs at a time.
 2. **Plan** – Gemini is prompted (see `getSystemPrompt()`) to return `restatement`, `visible_reply`, `thinking_log[]`, and a `tool_plan[]`. We parse/repair JSON strictly before touching the UI.
 3. **Execute** – `renderLlmResponse()` streams the sanitized `tool_plan[]` into the plan executor, which now behaves like an iterative worker:
-   - Every entry receives a unique `save_as` (auto `_stepN` if missing) and renders inside the Next Step list with a badge that flows Planned → Executing → Executed/Failed/Skipped.
-   - Step args are deep-cloned and passed through a mini resolver so strings like `$tool.schedule.result.balance` can borrow results from earlier steps.
+   - Every entry receives a unique `save_as`; when the model omits one we auto assign `_stepN` and log `[guard] auto save_as=_stepN` so telemetry shows how aliases were derived. Those ids power the Next Step board (badges flow Planned → Executing → Executed/Failed/Skipped).
+   - Step args are deep-cloned and passed through a mini resolver so strings like `$tool.schedule.result.balance` or `$tool.sandbox.result.interestSeries` can borrow structured objects or arrays from earlier steps.
    - Tool invocations run strictly sequentially; on each start we log `[tool] Step i/n <name> start`, update the timeline, and stamp the Tool Details drawer with resolved args.
    - Failures halt the remainder of the plan, annotate skipped tasks, and surface a friendly summary (“Plan finished with issues”) while re-enabling chat input.
 4. **Log** – While a tool runs, the Thinking Log doubles as the timeline, detailing start/done/error events with measured durations, console logs, and guard notes (stringified objects, missing refs, security denials). The Tool Details drawer expands automatically for the active step so engineers can audit code/args/results without DevTools.
-5. **Verify** – Chat bubbles append `Step i/n · Result:` rows for every tool, visible replies hydrate placeholders (`{{tool_result.*}}` and `{{tool.someStep.result.*}}`), and `turn.toolRuns[]` stores `{ tool, saveAs, argsResolved, startedAt, endedAt, timeMs, status, result|error }` for downstream telemetry. The Turn Summary Bar stays in sync with the collapsible panels and reflects aggregate tool counts/durations plus the final status badge.
+5. **Verify** – Chat bubbles append `Step i/n · Result:` rows for every tool, visible replies hydrate placeholders (`{{tool_result.*}}` and `{{tool.someStep.result.*}}`), and `turn.toolRuns[]` stores `{ tool, save_as, argsRaw, argsResolved, startedAt, endedAt, timeMs, status, result|error }` for downstream telemetry. The Turn Summary Bar stays in sync with the collapsible panels and reflects aggregate tool counts/durations plus the final status badge.
 
 ## Response Guardrails
 
@@ -38,9 +38,9 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 
 ## Tool Execution Details
 
-- **Registry-first design** – `tools/registry.js` exposes pure tool definitions. Each entry returns `prepareInput()` (arg sanitization) and `run()` (async executor). `get_current_date` shares aliases across `get_current_date`, `clock.now`, `time.now`, `get_time`; `js.run_sandbox` funnels code through a hardened worker.
-- **Sandbox guardrails** – `tools/sandboxRunner.js` enforces ≤1000 char snippets, JSON-serializable args, and a 50–1500 ms timeout. Workers strip network/storage APIs, freeze whitelisted globals, capture console output, and stringify any complex return values so UI rendering stays safe.
-- **Save-as & dependency graph** – Every plan item may declare `save_as`. The executor assigns `_stepN` when missing, caches `{ result, status, error }`, and exposes them to later steps via `$tool.<save_as>.<path>` placeholders. Missing refs immediately raise `[guard] missing ref ...` and stop the plan.
+- **Registry-first design** – `tools/registry.js` exposes pure tool definitions. Each entry returns `prepareInput()` (arg sanitization) and `run()` (async executor). `get_current_date` shares aliases across `get_current_date`, `clock.now`, `time.now`, `get_time`; `js.run_sandbox` funnels code through a hardened worker; `math.aggregate` (backed by `tools/mathAggregate.js`) sums/averages/min/max arrays without forcing a second snippet.
+- **Sandbox guardrails** – `tools/sandboxRunner.js` enforces ≤1000 char snippets, JSON-serializable args, and a 50–1500 ms timeout. Workers strip network/storage APIs, freeze whitelisted globals, capture console output, and deep-clone objects so `$tool.someStep.result.balance` stays dereferenceable while still flagging stringified fallbacks when cloning fails.
+- **Save-as & dependency graph** – Every plan item may declare `save_as`. The executor assigns `_stepN` when missing (and logs `[guard] auto save_as=_stepN`), caches `{ result, status, error }`, and exposes them to later steps via `$tool.<save_as>.<path>` placeholders. Missing refs immediately raise `[guard] missing ref ...` and stop the plan.
 - **Placeholder hydration** – Replies can now mix legacy `{{tool_result.local}}` tokens (last tool result) with scoped placeholders like `{{tool.schedule.result.balance}}`. The hydrator walks nested paths and falls back to `unavailable` so user-facing text always reflects actual data.
 - **Telemetry** – Each tool run writes to `turn.toolRuns[]`, the thinking log (start/done/error/duration/logs), Tool Details, and the Next Step list in lockstep. Timeline rows cap previews to ~2 KB to keep the UI responsive even when sandbox code returns arrays.
 - **Failure handling** – Any error (bad args, forbidden API, timeout) halts the plan, stamps the remaining steps as `Skipped`, reuses the fallback placeholder value (`unavailable`), and leaves Tool Details expanded on the point-of-failure entry for quick debugging.

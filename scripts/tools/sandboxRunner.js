@@ -220,7 +220,12 @@ function sanitizeSandboxResult(value) {
   }
   const valueType = typeof value;
   if (valueType === 'object') {
-    return { value: safeStringify(value), stringified: true };
+    try {
+      const cloned = JSON.parse(JSON.stringify(value));
+      return { value: cloned, stringified: false };
+    } catch (error) {
+      return { value: safeStringify(value), stringified: true };
+    }
   }
   if (valueType === 'function' || valueType === 'symbol') {
     return { value: String(value), stringified: true };

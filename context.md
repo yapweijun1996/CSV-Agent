@@ -2,7 +2,7 @@
 
 ## Goal
 
-Deliver a Vanilla JS front-end that acts like a transparent, iterative worker: the agent must execute every `tool_plan` step sequentially, support `save_as` aliases + `$tool.*` references, hydrate named placeholders in the visible reply, and surface a detailed audit trail (thinking log, plan board, tool details, summary bar) while keeping the codebase modular (`type="module"`, single-responsibility files ≤300 lines).
+Deliver a Vanilla JS front-end that acts like a transparent, iterative worker: the agent must execute every `tool_plan` step sequentially, support `save_as` aliases + `$tool.*` references, hydrate named placeholders in the visible reply, expose a `math.aggregate` helper for post-processing sandbox output, and surface a detailed audit trail (thinking log, plan board, tool details, summary bar) while keeping the codebase modular (`type="module"`, single-responsibility files ≤300 lines).
 
 ## TODO
 
@@ -16,13 +16,14 @@ Deliver a Vanilla JS front-end that acts like a transparent, iterative worker: t
 
 ## Notes
 
-- Each plan step is assigned `save_as` (auto `_stepN` if missing) and rendered in `tool_plan_list`; badges change color as states evolve and the active row expands to show reasoning + resolved args.
+- Each plan step is assigned `save_as` (auto `_stepN` if missing, with `[guard] auto save_as=…` logged) and rendered in `tool_plan_list`; badges change color as states evolve and the active row expands to show reasoning + resolved args.
 - The arg resolver walks nested objects/arrays, replacing strings shaped like `$tool.alias.path` with actual values from earlier runs. Missing refs emit `[guard] missing ref …` and abort the plan.
-- `turn.toolRuns[]` now captures `{ tool, saveAs, argsRaw, argsResolved, startedAt, endedAt, timeMs, status, result|error }` and drives both the Tool Details drawer and any future telemetry hook-ups.
+- `turn.toolRuns[]` now captures `{ tool, save_as, argsRaw, argsResolved, startedAt, endedAt, timeMs, status, result|error }` and drives both the Tool Details drawer and any future telemetry hook-ups.
 - The Thinking Log doubles as the timeline; we log `[plan]`, `[tool]`, `[log]`, `[guard]`, `[error]`, and `[decide]` markers so QA can replay every decision without devtools.
 - Summary bar buttons stay synced with the collapsible panels (clicking either toggles Thinking Log + Tool Details in lockstep, with the same expanded state mirrored via `aria-expanded`).
-- `scripts/tools/sandboxRunner.js` removes network/storage APIs, freezes globals, and stringifies non-primitives so sandbox results can safely flow through placeholders/UI.
+- `scripts/tools/sandboxRunner.js` removes network/storage APIs, freezes globals, deep-clones JSON-safe objects, and only stringifies results when cloning fails so downstream `$tool.alias.result.foo` dereferences stay intact.
 - Sandbox snippet cap raised to 1000 characters (was 500) so compound-interest style snippets no longer trip the guard; docs + system prompt updated accordingly.
+- `math.aggregate` lives in `tools/mathAggregate.js` and is exposed via the registry so plans can run sandbox → aggregate chains (sum/avg/min/max) without writing extra JavaScript code.
 
 ## Progress
 
@@ -34,3 +35,5 @@ Deliver a Vanilla JS front-end that acts like a transparent, iterative worker: t
 - README/context refreshed with the new architecture, tool contract, and outstanding QA TODOs so the next engineer immediately understands the flow.
 - Fixed the `replyEl` reference bug in `scripts/ui/chatView.js` so assistant replies hydrate correctly instead of throwing `ReferenceError: replyEl is not defined`.
 - Resolved `resolveArgReferences` destructuring typo in `scripts/tools/planExecutor.js`, ensuring sandbox plans retain their `args.code` payload instead of tripping the `js.run_sandbox 需要 code 字串` guard.
+- Added the `math.aggregate` registry entry + sanitizer so tool plans can sum/avg/min/max series (e.g., sandbox interest arrays) without more custom JS.
+- Updated the sandbox runner + plan executor to keep structured results available for `$tool.alias.result.*` lookups and to log `[guard] auto save_as=…` whenever aliases are inferred.

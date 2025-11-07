@@ -32,6 +32,27 @@
   </div>
 
   <aside class="assistant-sidebar" id="assistant-sidebar">
+    <section
+      class="assistant-status-hud"
+      id="assistant-status-hud"
+      aria-live="polite"
+      aria-label="Execution status">
+      <div class="hud-status-block">
+        <p class="hud-label">Execution status</p>
+        <p class="hud-title" id="hud-status-text">Idle</p>
+        <p class="hud-subtext" id="hud-status-subtext">Waiting for your question</p>
+      </div>
+      <div class="hud-progress-block">
+        <p class="hud-label">Plan progress</p>
+        <div class="hud-progress-meta">
+          <span id="hud-progress-count">0/0 steps</span>
+          <span id="hud-active-tool" class="hud-active-tool">—</span>
+        </div>
+        <div class="hud-progress-bar" aria-hidden="true">
+          <span class="hud-progress-fill" id="hud-progress-fill" style="width:0%"></span>
+        </div>
+      </div>
+    </section>
     <div class="message-list" id="message-list">
       <!-- Messages will be dynamically inserted here -->
     </div>

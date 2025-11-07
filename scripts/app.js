@@ -7,15 +7,25 @@ import { initChatView, addUserMessage, createAssistantMessage, appendToolResult 
 import { initSettingsModal } from './ui/settingsModal.js';
 import { initResizer } from './ui/resizer.js';
 import { createSummaryData, renderSummaryBar, updateSummaryStatus, recordToolUsage, finalizeSummary, syncSummaryButtons } from './ui/summaryBar.js';
+import { initProgressHud } from './ui/progressHud.js';
 import { createToolRegistry } from './tools/registry.js';
 import { createPlanExecutor } from './tools/planExecutor.js';
 
 const toolRegistry = createToolRegistry();
 const runToolPlan = createPlanExecutor({ toolRegistry });
+let hudController;
 
 document.addEventListener('DOMContentLoaded', () => {
   const elements = cacheDom();
   const syncPanels = () => syncSummaryButtons(getDetailPanelsExpanded());
+  hudController = initProgressHud({
+    root: elements.statusHud,
+    statusText: elements.hudStatusText,
+    statusSubtext: elements.hudStatusSubtext,
+    progressText: elements.hudProgressCount,
+    progressFill: elements.hudProgressFill,
+    activeTool: elements.hudActiveTool
+  });
   initThinkingLog({
     list: elements.thinkingLogList,
     toggle: elements.thinkingLogToggle,
@@ -64,6 +74,12 @@ function cacheDom() {
     chatInput: document.getElementById('chat-input'),
     sendBtn: document.getElementById('send-btn'),
     messageList: document.getElementById('message-list'),
+    statusHud: document.getElementById('assistant-status-hud'),
+    hudStatusText: document.getElementById('hud-status-text'),
+    hudStatusSubtext: document.getElementById('hud-status-subtext'),
+    hudProgressCount: document.getElementById('hud-progress-count'),
+    hudProgressFill: document.getElementById('hud-progress-fill'),
+    hudActiveTool: document.getElementById('hud-active-tool'),
     thinkingLogList: document.getElementById('thinking-log-list'),
     thinkingLogToggle: document.getElementById('thinking-log-toggle'),
     thinkingLogBody: document.getElementById('thinking-log-body'),
@@ -91,6 +107,7 @@ async function runSingleTurn(elements) {
   elements.chatInput.value = '';
   toggleInput(elements, false);
   resetPanels();
+  hudController?.setListening();
 
   try {
     const llmResponse = await callGeminiApi(userInput);
@@ -98,6 +115,7 @@ async function runSingleTurn(elements) {
   } catch (error) {
     console.error('LLM error', error);
     renderError(error.message || 'Sorry, something went wrong.');
+    hudController?.setIdle();
   } finally {
     toggleInput(elements, true);
   }
@@ -151,6 +169,7 @@ async function renderLlmResponse(response, userInput) {
       updateStepStatus,
       markPlanComplete
     },
+    hud: hudController,
     toolDetails: {
       render: (entry) => renderToolDetails(entry)
     },

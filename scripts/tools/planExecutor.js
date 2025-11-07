@@ -12,12 +12,15 @@ export function createPlanExecutor({ toolRegistry }) {
   return async function runToolPlan(planEntries, runtime) {
     if (!Array.isArray(planEntries) || planEntries.length === 0) {
       runtime.planPanel.showIdleState('No next step determined.');
+      runtime.hud?.setIdle?.();
       return 'succeeded';
     }
 
+    runtime.hud?.setPlanReady?.(planEntries.length);
     runtime.appendThinkingLog(`[plan] 準備執行 ${planEntries.length} 步`);
     runtime.summary.updateStatus('executing');
-    runtime.planPanel.setPlanSteps(planEntries.map((entry, index) => createPlanStep(entry, index, planEntries.length)));
+    const planSteps = planEntries.map((entry, index) => createPlanStep(entry, index, planEntries.length, runtime.appendThinkingLog));
+    runtime.planPanel.setPlanSteps(planSteps.map((step) => step.view));
 
     const namedResults = new Map();
     let lastToolResult = null;
@@ -25,10 +28,7 @@ export function createPlanExecutor({ toolRegistry }) {
 
     for (let index = 0; index < planEntries.length; index++) {
       const stepEntry = planEntries[index];
-      const stepId = getStepId(stepEntry, index);
-      const stepLabel = formatStepLabel(index, planEntries.length);
-      const stepInfo = { id: stepId, index, total: planEntries.length, label: stepLabel };
-
+      const { stepInfo } = planSteps[index];
       const status = await runSinglePlanStep(stepEntry, {
         ...runtime,
         stepInfo,
@@ -41,12 +41,16 @@ export function createPlanExecutor({ toolRegistry }) {
 
       if (status === 'failed') {
         encounteredFailure = true;
-        markRemainingStepsAsSkipped(planEntries, index + 1, runtime.planPanel);
+        markRemainingStepsAsSkipped(planSteps, index + 1, runtime.planPanel);
         break;
       }
     }
 
     runtime.planPanel.markPlanComplete({
+      totalSteps: planEntries.length,
+      hasFailure: encounteredFailure
+    });
+    runtime.hud?.setPlanComplete?.({
       totalSteps: planEntries.length,
       hasFailure: encounteredFailure
     });
@@ -60,6 +64,11 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
   const { stepInfo } = runtime;
   const reason = planEntry.reason || 'No specific reason provided.';
   runtime.appendThinkingLog(`[plan] ${stepInfo.label} - ${reason}`);
+  runtime.hud?.setStepExecuting?.({
+    stepNumber: stepInfo.index + 1,
+    totalSteps: stepInfo.total,
+    tool: planEntry.need_tool ? (planEntry.tool || 'selecting tool') : 'No tool needed'
+  });
 
   if (!planEntry.need_tool) {
     runtime.planPanel.updateStepStatus(stepInfo.id, 'succeeded', {
@@ -70,6 +79,10 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
       prefix: stepInfo.label,
       label: 'Note',
       value: reason
+    });
+    runtime.hud?.setStepResult?.({
+      stepNumber: stepInfo.index + 1,
+      status: 'succeeded'
     });
     return 'succeeded';
   }
@@ -86,6 +99,10 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
       isError: true
     });
     runtime.summary.updateStatus('failed');
+    runtime.hud?.setStepResult?.({
+      stepNumber: stepInfo.index + 1,
+      status: 'failed'
+    });
     return 'failed';
   }
 
@@ -101,6 +118,10 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
       isError: true
     });
     runtime.summary.updateStatus('failed');
+    runtime.hud?.setStepResult?.({
+      stepNumber: stepInfo.index + 1,
+      status: 'failed'
+    });
     return 'failed';
   }
 
@@ -117,6 +138,10 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
       isError: true
     });
     runtime.summary.updateStatus('failed');
+    runtime.hud?.setStepResult?.({
+      stepNumber: stepInfo.index + 1,
+      status: 'failed'
+    });
     return 'failed';
   }
 
@@ -143,6 +168,10 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
       error: { code: 'args_invalid', detail: inputError.message }
     });
     runtime.summary.updateStatus('failed');
+    runtime.hud?.setStepResult?.({
+      stepNumber: stepInfo.index + 1,
+      status: 'failed'
+    });
     return 'failed';
   }
 
@@ -154,7 +183,7 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
 
   const runIndex = pushToolRun(runtime.turn, {
     id: stepInfo.id,
-    saveAs: stepInfo.id,
+    save_as: stepInfo.id,
     tool: resolvedTool.name,
     argsRaw: planEntry.args || null,
     argsResolved: toolInput,
@@ -207,6 +236,10 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
       status: 'succeeded',
       tool: resolvedTool.name
     });
+    runtime.hud?.setStepResult?.({
+      stepNumber: stepInfo.index + 1,
+      status: 'succeeded'
+    });
     runtime.setLastToolResult(rawResult);
     hydrateReply(runtime, {
       namedResults: runtime.namedResults,
@@ -248,6 +281,10 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
       status: 'failed',
       error: { code: errorCode, detail: detailMessage },
       tool: resolvedTool.name
+    });
+    runtime.hud?.setStepResult?.({
+      stepNumber: stepInfo.index + 1,
+      status: 'failed'
     });
     hydrateReply(runtime, {
       namedResults: runtime.namedResults,
@@ -308,18 +345,27 @@ function getStepId(planEntry, index) {
   return `_step${index + 1}`;
 }
 
-function createPlanStep(entry, index, total) {
-  return {
-    id: getStepId(entry, index),
+function createPlanStep(entry, index, total, appendThinkingLog) {
+  const hasSaveAs = typeof entry.save_as === 'string' && entry.save_as.trim().length > 0;
+  const id = getStepId(entry, index);
+  if (!hasSaveAs && typeof appendThinkingLog === 'function') {
+    appendThinkingLog(`[guard] auto save_as=${id}`);
+  }
+  const view = {
+    id,
     title: formatStepLabel(index, total),
     tool: entry.need_tool ? (entry.tool || 'unspecified') : 'No tool',
     reason: entry.reason || ''
   };
+  return {
+    view,
+    stepInfo: { id, index, total, label: view.title }
+  };
 }
 
-function markRemainingStepsAsSkipped(planEntries, startIndex, planPanel) {
-  for (let i = startIndex; i < planEntries.length; i++) {
-    const stepId = getStepId(planEntries[i], i);
+function markRemainingStepsAsSkipped(planSteps, startIndex, planPanel) {
+  for (let i = startIndex; i < planSteps.length; i++) {
+    const stepId = planSteps[i].stepInfo.id;
     planPanel.updateStepStatus(stepId, 'skipped', {
       message: 'Skipped due to earlier failure'
     });

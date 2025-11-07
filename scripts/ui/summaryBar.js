@@ -155,7 +155,11 @@ function inferIntent(response) {
     .join(' ')
     .toLowerCase();
 
-  if (normalizedTools.includes('js.run_sandbox') || ARITHMETIC_INTENT_KEYWORDS.some((keyword) => haystack.includes(keyword))) {
+  if (
+    normalizedTools.includes('js.run_sandbox') ||
+    normalizedTools.includes('math.aggregate') ||
+    ARITHMETIC_INTENT_KEYWORDS.some((keyword) => haystack.includes(keyword))
+  ) {
     return { icon: '🔢', label: 'Arithmetic' };
   }
 
