@@ -6,6 +6,9 @@
 * Do no hardcode logic to Agent, if not Agent cannot perform Task Intelligently.
 * Update Info in README.md, about the logic and structure and Agent logic and so on, allow Engineer to easy to understand and cheap to maintain.
 * Write comment for code allow us to know what the code is trying to do and wont get lost.
+* Use ES Modules：所有自定义脚本采用 type="module"，每个文件专注单一职责（UI、状态、数据、工具分层）。
+* 控制文件体积：避免巨石脚本（monolith）。单文件建议 ≤ 300–500 行、≤ 20 KB（未压缩）；超过就拆分模块。
+* 公共 API 明确：每个模块只导出需要的命名接口（export function ...），避免隐式副作用，便于 tree-shaking。
 
 ## CSV Agent Ability Design
 * 像員工一樣 small step、小步驟連續執行multi-step task
