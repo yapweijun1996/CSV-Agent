@@ -30,9 +30,53 @@
     overflow-y: auto;
   }
   .assistant-sidebar {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: #f1f5f9; /* Slight tint to distinguish */
+    padding: 0; /* Remove padding to allow full height chat */
+  }
+  .message-list {
+    flex: 1;
     padding: 24px;
     overflow-y: auto;
-    background: #f1f5f9; /* Slight tint to distinguish */
+  }
+  .message {
+    padding: 12px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    max-width: 80%;
+  }
+  .message.assistant {
+    background: #ffffff;
+    align-self: flex-start;
+  }
+  .message.user {
+    background: var(--accent);
+    color: white;
+    align-self: flex-end;
+  }
+  .chat-input-area {
+    display: flex;
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    background: #ffffff;
+  }
+  #chat-input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    resize: none;
+  }
+  #send-btn {
+    margin-left: 10px;
+    padding: 10px 20px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
   }
   .resizer {
     background: var(--border);
@@ -84,6 +128,43 @@
       mainLayout.style.gridTemplateColumns = `1fr 5px ${sidebarWidth}px`;
     }
   }
+  const sendBtn = document.getElementById('send-btn');
+  const chatInput = document.getElementById('chat-input');
+  const messageList = document.getElementById('message-list');
+
+  function addMessage(text, sender) {
+    const messageDiv = document.createElement('div');
+    messageDiv.classList.add('message', sender);
+    // A simple way to prevent HTML injection, though not foolproof for complex cases.
+    messageDiv.textContent = text;
+    messageList.appendChild(messageDiv);
+    messageList.scrollTop = messageList.scrollHeight; // Auto-scroll to bottom
+  }
+
+  function handleSend() {
+    const text = chatInput.value.trim();
+    if (text) {
+      addMessage(text, 'user');
+      chatInput.value = '';
+      
+      // Simulate assistant response
+      setTimeout(() => {
+        addMessage("Thinking...", 'assistant');
+      }, 500);
+      setTimeout(() => {
+        addMessage("This is a simulated response based on your query: '" + text + "'", 'assistant');
+      }, 1500);
+    }
+  }
+
+  sendBtn.addEventListener('click', handleSend);
+  chatInput.addEventListener('keydown', (e) => {
+    // Send on Enter, but allow new lines with Shift+Enter
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); // Prevents adding a new line
+      handleSend();
+    }
+  });
 </script>
 
 </body>
