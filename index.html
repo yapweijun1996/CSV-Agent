@@ -20,10 +20,78 @@
     font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     overflow: hidden; /* Prevent body scroll */
   }
+  .app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 24px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+  }
+  .app-header h1 {
+    font-size: 18px;
+    margin: 0;
+  }
+  .header-actions {
+    display: flex;
+    gap: 10px;
+  }
+  .btn {
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .modal {
+    position: fixed;
+    z-index: 100;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.4);
+  }
+  .modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%;
+    max-width: 500px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  }
+  .modal-content label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  .modal-content input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--mono);
+  }
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 20px;
+  }
+  .close-btn {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+  }
   .main-layout {
     display: grid;
     grid-template-columns: 1fr 5px 400px;
-    height: 100vh;
+    height: calc(100vh - 53px); /* Adjust height for header */
   }
   .content-area {
     padding: 24px;
@@ -32,7 +100,7 @@
   .assistant-sidebar {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
     background: #f1f5f9; /* Slight tint to distinguish */
     padding: 0; /* Remove padding to allow full height chat */
   }
@@ -86,6 +154,14 @@
 </head>
 <body>
 
+<header class="app-header">
+  <h1>CSV Analysis Agent</h1>
+  <div class="header-actions">
+    <button id="settings-btn" class="btn">Settings</button>
+    <button id="hide-assistant-btn" class="btn">Hide Assistant</button>
+  </div>
+</header>
+
 <div class="main-layout" id="main-layout">
   <main class="content-area">
     <h2>Main Panel</h2>
@@ -105,6 +181,22 @@
       <button id="send-btn">Send</button>
     </div>
   </aside>
+</div>
+
+
+</body>
+
+<!-- Settings Modal -->
+<div id="settings-modal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <span class="close-btn">&times;</span>
+    <h2>Settings</h2>
+    <label for="api-key-input">Gemini API Key</label>
+    <input type="password" id="api-key-input" placeholder="Enter your API key...">
+    <div class="modal-footer">
+      <button id="save-api-key-btn" class="btn primary">Save</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -165,7 +257,58 @@
       handleSend();
     }
   });
+  // Button functionalities
+  const settingsBtn = document.getElementById('settings-btn');
+  const hideAssistantBtn = document.getElementById('hide-assistant-btn');
+  const assistantSidebar = document.getElementById('assistant-sidebar');
+  const resizerEl = document.getElementById('resizer');
+  const settingsModal = document.getElementById('settings-modal');
+  const closeBtn = document.querySelector('.close-btn');
+
+  hideAssistantBtn.addEventListener('click', () => {
+    const isHidden = assistantSidebar.style.display === 'none';
+    if (isHidden) {
+      assistantSidebar.style.display = 'flex';
+      resizerEl.style.display = 'block';
+      mainLayout.style.gridTemplateColumns = `1fr 5px 400px`;
+      hideAssistantBtn.textContent = 'Hide Assistant';
+    } else {
+      assistantSidebar.style.display = 'none';
+      resizerEl.style.display = 'none';
+      mainLayout.style.gridTemplateColumns = `1fr`;
+      hideAssistantBtn.textContent = 'Show Assistant';
+    }
+  });
+
+  settingsBtn.addEventListener('click', () => {
+    const apiKeyInput = document.getElementById('api-key-input');
+    apiKeyInput.value = localStorage.getItem('GEMINI_API_KEY') || '';
+    settingsModal.style.display = 'block';
+  });
+
+  closeBtn.addEventListener('click', () => {
+    settingsModal.style.display = 'none';
+  });
+
+  window.addEventListener('click', (event) => {
+    if (event.target == settingsModal) {
+      settingsModal.style.display = 'none';
+    }
+  });
+
+  const saveApiKeyBtn = document.getElementById('save-api-key-btn');
+  saveApiKeyBtn.addEventListener('click', () => {
+    const apiKeyInput = document.getElementById('api-key-input');
+    const apiKey = apiKeyInput.value.trim();
+    if (apiKey) {
+      localStorage.setItem('GEMINI_API_KEY', apiKey);
+      alert('API Key saved!');
+    } else {
+      localStorage.removeItem('GEMINI_API_KEY');
+      alert('API Key removed!');
+    }
+    settingsModal.style.display = 'none';
+  });
 </script>
 
-</body>
 </html>
