@@ -5,6 +5,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const messageList = document.getElementById('message-list');
   const thinkingLogList = document.getElementById('thinking-log-list');
   const toolPlanContent = document.getElementById('tool-plan-content');
+  const resizer = document.getElementById('resizer');
+  const assistantSidebar = document.getElementById('assistant-sidebar');
+  const rootStyle = document.documentElement;
   
   // --- Settings Modal Elements ---
   const settingsBtn = document.getElementById('settings-btn');
@@ -13,6 +16,31 @@ document.addEventListener('DOMContentLoaded', () => {
   const saveSettingsBtn = document.getElementById('save-settings-btn');
   const apiKeyInput = document.getElementById('api-key-input');
   const modelInput = document.getElementById('model-input');
+
+  // --- Resizer State ---
+  const MIN_ASSISTANT_WIDTH = 280;
+  const MAX_ASSISTANT_WIDTH = 640;
+  const KEYBOARD_RESIZE_STEP = 24;
+  const resizeState = {
+    active: false,
+    pointerId: null,
+    startX: 0,
+    startWidth: 0,
+    latestWidth: getCurrentAssistantWidth()
+  };
+
+  if (resizer && assistantSidebar) {
+    resizer.setAttribute('aria-valuemin', String(MIN_ASSISTANT_WIDTH));
+    resizer.setAttribute('aria-valuemax', String(MAX_ASSISTANT_WIDTH));
+    resizer.setAttribute('aria-valuenow', String(resizeState.latestWidth));
+
+    resizer.addEventListener('pointerdown', handleResizeStart);
+    resizer.addEventListener('pointermove', handlePointerMove);
+    resizer.addEventListener('pointerup', handleResizeEnd);
+    resizer.addEventListener('lostpointercapture', handleResizeCancel);
+    resizer.addEventListener('keydown', handleResizerKeypress);
+    window.addEventListener('pointerup', handleResizeEnd);
+  }
 
   // --- Event Listeners ---
   sendBtn.addEventListener('click', handleSend);
@@ -57,6 +85,105 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('Please enter a valid API Key.');
     }
   });
+
+  // --- Resizer Functions ---
+
+  function handleResizeStart(event) {
+    if (!assistantSidebar || !resizer) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    resizeState.active = true;
+    resizeState.pointerId = event.pointerId;
+    resizeState.startX = event.clientX;
+    resizeState.startWidth = assistantSidebar.getBoundingClientRect().width;
+    resizer.classList.add('is-active');
+    document.body.classList.add('is-resizing');
+    resizer.setPointerCapture(event.pointerId);
+    logUiEvent(`[layout] 開始調整側欄（${Math.round(resizeState.startWidth)}px）`);
+  }
+
+  function handlePointerMove(event) {
+    if (!resizeState.active || !assistantSidebar) return;
+    const delta = event.clientX - resizeState.startX;
+    const desiredWidth = resizeState.startWidth - delta;
+    updateAssistantWidth(desiredWidth);
+  }
+
+  function handleResizeEnd() {
+    if (!resizeState.active) return;
+    finalizeResize(false);
+  }
+
+  function handleResizeCancel() {
+    if (!resizeState.active) return;
+    finalizeResize(true);
+  }
+
+  function finalizeResize(cancelled) {
+    if (!resizer) return;
+    if (resizeState.pointerId !== null) {
+      try {
+        resizer.releasePointerCapture(resizeState.pointerId);
+      } catch (error) {
+        console.warn('Pointer capture release failed:', error);
+      }
+    }
+
+    resizeState.active = false;
+    resizeState.pointerId = null;
+    resizer.classList.remove('is-active');
+    document.body.classList.remove('is-resizing');
+
+    if (cancelled) {
+      logUiEvent('[layout] 已取消側欄調整');
+      return;
+    }
+
+    logUiEvent(`[layout] 側欄寬度設定為 ${Math.round(resizeState.latestWidth)}px`);
+  }
+
+  function handleResizerKeypress(event) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const delta = event.key === 'ArrowLeft' ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP;
+    const nextWidth = updateAssistantWidth(resizeState.latestWidth + delta);
+    logUiEvent(`[layout] 鍵盤調整至 ${Math.round(nextWidth)}px`);
+  }
+
+  function updateAssistantWidth(width) {
+    const clampedWidth = clamp(width, MIN_ASSISTANT_WIDTH, MAX_ASSISTANT_WIDTH);
+    rootStyle.style.setProperty('--assistant-width', `${clampedWidth}px`);
+    resizeState.latestWidth = clampedWidth;
+    if (resizer) {
+      resizer.setAttribute('aria-valuenow', String(Math.round(clampedWidth)));
+    }
+    return clampedWidth;
+  }
+
+  function getCurrentAssistantWidth() {
+    const raw = getComputedStyle(rootStyle).getPropertyValue('--assistant-width');
+    const parsed = parseFloat(raw);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+    return 400;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function logUiEvent(message) {
+    appendThinkingLogEntry(message);
+  }
+
+  function appendThinkingLogEntry(text) {
+    if (!thinkingLogList) return;
+    const li = document.createElement('li');
+    li.textContent = text;
+    thinkingLogList.appendChild(li);
+    thinkingLogList.scrollTop = thinkingLogList.scrollHeight;
+  }
 
   // --- Core Functions ---
 

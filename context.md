@@ -1,22 +1,38 @@
-# CSV Agent Task Context
+# CSV Agent - Gemini Integration
 
 ## Goal
-Implement a tool execution flow for a `get_current_date` tool in a vanilla JavaScript project. The agent should be able to understand a user's request for the time, execute a tool, and display the result in the UI.
+
+Wire the chat input to a real Gemini API call, force a structured JSON response, and render the fields into the Chat, Timeline, and Next Step UI components.
 
 ## TODO
-- [ ] Setup basic HTML, CSS, and JS files.
-- [ ] Implement the core logic to simulate LLM responses and manage the chat flow.
-- [ ] Implement the `get_current_date` tool.
-- [ ] Implement the tool executor to call the tool based on the `tool_plan`.
-- [ ] Implement result handling to update the UI.
-- [ ] Handle tool name aliases and implicit mapping.
-- [ ] Implement error handling.
-- [ ] Update documentation (`README.md`).
+
+- [ ] **Diagnose & Plan:** Analyze existing HTML/CSS/JS and create a detailed implementation plan.
+- [ ] **Implement Gemini API Call:** Modify `script.js` to send user messages to the Gemini API.
+- [ ] **Enforce JSON Contract:** Add logic to instruct Gemini to return JSON and handle potential non-JSON responses.
+- [ ] **Render UI Components:** Implement rendering for Chat, Timeline, and Next Step areas from the parsed JSON.
+- [ ] **Test & Verify:** Test with specified user inputs and error conditions.
 
 ## Notes
-- The project is a pure vanilla frontend application (HTML, CSS, JS).
-- No backend or Node.js is required.
-- The focus is on the tool execution mechanism, not on a real LLM integration. We will simulate the LLM's JSON output.
 
-## Progress
-- Initial setup and planning complete. Starting with file creation.
+- The agent must strictly adhere to the JSON contract provided.
+- Error handling for non-JSON responses is critical.
+- The `tool_plan` is for display only; no tools will be executed.
+
+---
+
+## Current Goal (Resizer Diagnosis)
+
+Keep the vanilla CSV Agent UI compliant with the iterative worker workflow while ensuring the assistant/content splitter (`.resizer`) behaves as expected.
+
+### TODO
+- [x] Inspect the current HTML/CSS/JS to confirm whether the `.resizer` divider and drag handling exist.
+- [x] Plan the required markup/CSS/JS updates so the resizer can be implemented without violating the no-framework constraint.
+- [x] Implement the resizer (markup hook, CSS sizing via variables, JS drag logic, logging).
+
+### Notes
+- No `<div class="resizer" id="resizer">` exists in `index.html`, and there is no related styling or pointer event handling in `style.css` / `script.js`.
+- Without DOM + event bindings, the drag logic cannot run, so the resizer appears "broken" even though nothing is hooked up yet.
+
+### Progress
+- Verified the resizer element/logic is missing entirely, explaining why the divider is non-functional.
+- Added CSS custom properties + an accessible separator element, then wired pointer/keyboard drag logic (with thinking logs) so the assistant width can be adjusted live.
