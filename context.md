@@ -1,17 +1,16 @@
-# Goal
-- Provide a simple, unified vanilla frontend for the CSV Agent with a persistent resizer and multi-step agent orchestration.
-- Surface agent thinking/logs and document the iteration flow for easy maintenance.
+# Task: Integrate Gemini Provider (Connectivity Test)
 
-# TODO
-1. Match left/right layout + resizer styling to reference mock. ✅
-2. Introduce drag/drop zone + assistant controls/new session flow. ✅
-3. Mirror latest UI/UX notes in README once dust settles. ✅
+## Goal
+Integrate Gemini into the UI, allowing a user to save an API key and perform a basic connectivity test.
 
-# Notes
-- Header now matches reference (title + New Session/History/Settings/Upload buttons).
-- Left pane hosts dashed dropzone with drag-state feedback; right pane assistant has icon controls + always-visible divider.
-- Multi-step planner + logging remain; README still reflects earlier version and needs another pass when UI stabilizes.
-- Need bilingual response flow per instructions.
+## TODO
+- [ ] **Plan:** Create context.md and establish a todo list.
+- [ ] **HTML:** Add a "Provider Settings" panel to `index.html`.
+- [ ] **CSS:** Style the new settings panel in `style.css`.
+- [ ] **JavaScript:** Implement logic in `script.js` to save the API key to localStorage and test the connection.
+- [ ] **Verify:** Confirm the UI and connectivity test work correctly.
 
-# Progress
-- Rebuilt layout with dropzone/resizer + assistant icons; wired new session/history buttons and drop handling, refreshed README to document flow.
+## Notes
+- The connection test should simply confirm that the API key is valid by getting a fixed "READY" response.
+- No complex tool-calling or data cleaning is required at this stage.
+- The API key should be stored in `localStorage`.

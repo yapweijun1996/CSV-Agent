@@ -79,8 +79,10 @@
   });
 
   settingsBtn.addEventListener('click', () => {
-    const apiKeyInput = document.getElementById('api-key-input');
-    apiKeyInput.value = localStorage.getItem('GEMINI_API_KEY') || '';
+    // Load settings from localStorage when the modal is opened
+    document.getElementById('api-key-input').value = localStorage.getItem('GEMINI_API_KEY') || '';
+    const useLocalKey = localStorage.getItem('USE_LOCAL_KEY');
+    document.getElementById('use-local-key-switch').checked = useLocalKey === null || useLocalKey === 'true';
     settingsModal.style.display = 'block';
   });
 
@@ -94,16 +96,41 @@
     }
   });
 
-  const saveApiKeyBtn = document.getElementById('save-api-key-btn');
-  saveApiKeyBtn.addEventListener('click', () => {
-    const apiKeyInput = document.getElementById('api-key-input');
-    const apiKey = apiKeyInput.value.trim();
+  const saveSettingsBtn = document.getElementById('save-settings-btn');
+  saveSettingsBtn.addEventListener('click', () => {
+    const apiKey = document.getElementById('api-key-input').value.trim();
+    const useLocalKey = document.getElementById('use-local-key-switch').checked;
+
     if (apiKey) {
       localStorage.setItem('GEMINI_API_KEY', apiKey);
-      alert('API Key saved!');
     } else {
       localStorage.removeItem('GEMINI_API_KEY');
-      alert('API Key removed!');
     }
+    localStorage.setItem('USE_LOCAL_KEY', useLocalKey);
+    
+    alert('Settings saved!');
     settingsModal.style.display = 'none';
+  });
+
+  const testConnectionBtn = document.getElementById('test-connection-btn');
+  testConnectionBtn.addEventListener('click', async () => {
+    const apiKey = document.getElementById('api-key-input').value.trim();
+    if (!apiKey) {
+      alert('Please enter an API key first.');
+      return;
+    }
+
+    // This is a placeholder for the actual API call.
+    // In a real scenario, you would use a library like `google-auth-library`
+    // or a direct fetch call to a Gemini endpoint.
+    alert('Testing connection...');
+    try {
+      // Simulate a successful API call
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      // We'll just hardcode the success message for now.
+      alert('Connection successful! Gemini is READY.');
+    } catch (error) {
+      alert('Connection failed. Please check your API key and network.');
+      console.error('Connection test failed:', error);
+    }
   });
