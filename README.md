@@ -24,6 +24,8 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 
 - **`safeGet()` path validator** – `callGeminiApi()` now walks `candidates[0].content.parts[0].text` via a shared helper that throws `非預期回應` whenever Gemini returns a refusal/safety card without those fields. This keeps the UI from attempting to read `undefined.text` and lets the same error path surface a clear message to users.
 - **JSON repair fallback** – If the returned text is malformed JSON, we still slice between the first `{` and last `}` and retry parsing before showing an error bubble.
+- **Schema validation (`validateGeminiResponse`)** – After parsing (or repairing) the JSON, we check that every property matches the contract: `restatement`/`visible_reply` must be non-empty strings, `thinking_log` must be a string array, and `tool_plan` must contain at least one `{ need_tool, reason }` object with valid types. Violations throw `合約錯誤：…` so the UI cannot render partial/invalid data.
+- **Prompt hardening** – `getSystemPrompt()` now spells out the same enforcement rules to Gemini: time/date requests require `need_tool=true` plus a supported clock tool id, `visible_reply` must not apologize about lacking real-time data, and omitting the tool id when `need_tool=true` is treated as a breach. This keeps the model aligned with the front-end contract.
 
 ## Tool Execution Details
 

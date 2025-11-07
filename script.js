@@ -287,12 +287,19 @@ Guidelines:
 2. 'visible_reply' must be what the user will read. When you expect a tool result, reference placeholders so the host can inject data, e.g. "Current time is {{tool_result.local}} (ISO: {{tool_result.iso}})."
 3. 'thinking_log' is a concise step-by-step trace using bracketed tags such as "[read] ...", "[intent] ...", "[plan] ...", "[decide] ...".
 4. 'tool_plan' ALWAYS contains at least one object describing your next action.
+5. 'visible_reply' must NEVER say you lack real-time data; rely on {{tool_result.*}} placeholders instead of refusing.
 
 About tools:
 - Any tool you list WILL be executed by the host system. Do not claim you lack real-time capabilities; rely on the tool output instead.
 - Supported tool ids: "get_current_date", "clock.now", "time.now", "get_time" (these are aliases of the same clock tool). Pick one of them whenever the user asks for the current date/time.
 - When no tool is needed, set "need_tool": false and clearly explain why in "reason".
 - When a tool is needed, set "need_tool": true, specify the tool id, and describe what data you expect to place into the visible reply via {{tool_result.local}} / {{tool_result.iso}} / {{tool_result.epochMs}} placeholders.
+
+Contract enforcement:
+- The host strictly validates this schema. Missing fields, wrong types, or empty tool plans will terminate the turn.
+- Any user request for current date/time/clock (English or Chinese) MUST set "need_tool": true, choose one of the supported tool ids, and explain how its output will be used. Saying you cannot provide real-time data counts as a breach.
+- Whenever "need_tool" is true you must include the supported tool id ("get_current_date", "clock.now", "time.now", "get_time"). No other ids will run.
+- If you truly do not need a tool, set "need_tool": false and provide a concrete, referenceable reason in "reason".
 
 Never return explanatory text outside the JSON object.`;
   }
@@ -315,6 +322,92 @@ Never return explanatory text outside the JSON object.`;
       console.error("JSON repair failed:", e);
       return null;
     }
+  }
+
+  /**
+   * Validates the LLM response against the enforced schema so UI rendering never runs bad data.
+   * @param {object} payload - Raw JSON parsed from Gemini.
+   * @returns {object} Sanitized payload guaranteed to match the contract.
+   */
+  function validateGeminiResponse(payload) {
+    const errors = [];
+    const sanitized = {
+      restatement: '',
+      visible_reply: '',
+      thinking_log: [],
+      tool_plan: []
+    };
+
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      errors.push('response 必須為物件');
+    }
+
+    const restatement = typeof payload?.restatement === 'string' ? payload.restatement.trim() : '';
+    if (restatement) {
+      sanitized.restatement = restatement;
+    } else {
+      errors.push('restatement 缺少或非字串');
+    }
+
+    const visibleReply = typeof payload?.visible_reply === 'string' ? payload.visible_reply.trim() : '';
+    if (visibleReply) {
+      sanitized.visible_reply = visibleReply;
+    } else {
+      errors.push('visible_reply 缺少或非字串');
+    }
+
+    if (Array.isArray(payload?.thinking_log)) {
+      const sanitizedLogs = [];
+      payload.thinking_log.forEach((entry, index) => {
+        if (typeof entry !== 'string') {
+          errors.push(`thinking_log[${index}] 必須為字串`);
+          return;
+        }
+        sanitizedLogs.push(entry.trim() || entry);
+      });
+      sanitized.thinking_log = sanitizedLogs;
+    } else {
+      errors.push('thinking_log 必須為字串陣列');
+    }
+
+    if (Array.isArray(payload?.tool_plan) && payload.tool_plan.length > 0) {
+      const sanitizedPlan = [];
+      payload.tool_plan.forEach((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          errors.push(`tool_plan[${index}] 必須為物件`);
+          return;
+        }
+
+        if (typeof entry.need_tool !== 'boolean') {
+          errors.push(`tool_plan[${index}].need_tool 必須為布林值`);
+        }
+
+        const reason = typeof entry.reason === 'string' ? entry.reason.trim() : '';
+        if (!reason) {
+          errors.push(`tool_plan[${index}].reason 缺少或為空`);
+        }
+
+        const toolId = typeof entry.tool === 'string' ? entry.tool.trim() : '';
+        const sanitizedEntry = {
+          need_tool: entry.need_tool === true,
+          reason
+        };
+        if (toolId) {
+          sanitizedEntry.tool = toolId;
+        }
+        sanitizedPlan.push(sanitizedEntry);
+      });
+      sanitized.tool_plan = sanitizedPlan;
+    } else {
+      errors.push('tool_plan 必須為至少一個項目的陣列');
+    }
+
+    if (errors.length) {
+      console.warn('Gemini schema violation:', errors, payload);
+      throw new Error(`合約錯誤：${errors.join('；')}`);
+    }
+
+    return sanitized;
   }
 
   /**
@@ -398,16 +491,19 @@ Never return explanatory text outside the JSON object.`;
       throw new Error('非預期回應：請稍後再試。');
     }
 
+    let parsedPayload;
     try {
-      return JSON.parse(jsonString);
+      parsedPayload = JSON.parse(jsonString);
     } catch (e) {
       console.warn("Initial JSON.parse failed, attempting to repair.", e);
       const repaired = repairJson(jsonString);
       if (repaired) {
-        return repaired;
+        return validateGeminiResponse(repaired);
       }
       throw new Error("The model returned an invalid JSON response. Please try again.");
     }
+
+    return validateGeminiResponse(parsedPayload);
   }
 
   // --- UI Rendering Functions ---
