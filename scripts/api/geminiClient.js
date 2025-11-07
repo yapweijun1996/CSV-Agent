@@ -154,6 +154,7 @@ function validateGeminiResponse(payload) {
     });
   }
 
+  let requiresPlaceholder = false;
   if (!Array.isArray(payload.tool_plan) || payload.tool_plan.length === 0) {
     errors.push('tool_plan 必須包含至少一個步驟');
   } else {
@@ -165,6 +166,9 @@ function validateGeminiResponse(payload) {
       if (typeof entry.need_tool !== 'boolean') {
         errors.push(`tool_plan[${index}].need_tool 必須為布林值`);
       }
+      if (entry.need_tool) {
+        requiresPlaceholder = true;
+      }
       const reason = typeof entry.reason === 'string' ? entry.reason.trim() : '';
       if (!reason) {
         errors.push(`tool_plan[${index}].reason 必須為字串`);
@@ -174,6 +178,13 @@ function validateGeminiResponse(payload) {
         reason
       });
     });
+  }
+
+  if (requiresPlaceholder) {
+    const hasPlaceholder = /\{\{\s*(tool_result|tool)\./.test(visibleReply);
+    if (!hasPlaceholder) {
+      errors.push('visible_reply 需包含 {{tool_result.*}} 或 {{tool.alias.*}} 以呈現工具輸出');
+    }
   }
 
   if (errors.length) {

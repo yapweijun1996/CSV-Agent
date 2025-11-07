@@ -19,7 +19,10 @@ export function hydrateReplyTemplate(template, context) {
       if (pathParts.length === 0) {
         return stringify(record);
       }
-      const value = getDeepValue(record, pathParts);
+      let value = getDeepValue(record, pathParts);
+      if (value === undefined && record?.result) {
+        value = getDeepValue(record.result, pathParts);
+      }
       return value === undefined ? fallbackValue : stringify(value);
     }
     return fallbackValue;
@@ -28,7 +31,11 @@ export function hydrateReplyTemplate(template, context) {
 
 function formatValueFromResult(result, path, fallbackValue) {
   if (!result) return fallbackValue;
-  const value = getDeepValue(result, path.split('.'));
+  const pathSegments = path.split('.');
+  let value = getDeepValue(result, pathSegments);
+  if (value === undefined && result.result) {
+    value = getDeepValue(result.result, pathSegments);
+  }
   if (value === undefined || value === null) {
     return fallbackValue;
   }
