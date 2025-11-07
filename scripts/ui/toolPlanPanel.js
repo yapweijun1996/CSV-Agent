@@ -66,6 +66,7 @@ export function updateStepStatus(stepId, status, details = {}) {
   const config = statusMap[status] || statusMap.pending;
   view.badge.textContent = config.label;
   view.badge.className = `plan-step-status ${config.className}`;
+  view.item?.classList.toggle('is-active', status === 'executing');
   view.body.classList.toggle('is-collapsed', status !== 'executing');
   if (details.message) {
     view.body.innerHTML = '';

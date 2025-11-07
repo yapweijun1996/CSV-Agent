@@ -10,7 +10,8 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
   - `app.js` – Entry point that wires DOM events, Gemini calls, and tool execution.
   - `api/geminiClient.js` – Fetch wrapper, system prompt, JSON repair, schema validation.
   - `state/sessionState.js` – Turn bookkeeping + `toolRuns` mutations.
-  - `ui/*.js` – View-specific controllers (`chatView`, `thinkingLog`, `toolPlanPanel`, `toolDetailsDrawer`, `summaryBar`, `settingsModal`, `resizer`).
+  - `state/memoryStore.js` – IndexedDB-backed cache of recent turns (intent, tool plan, replies) used for follow-up context + the Clear Memory control.
+  - `ui/*.js` – View-specific controllers (`chatView`, `thinkingLog`, `toolPlanPanel`, `toolDetailsDrawer`, `summaryBar`, `settingsModal`, `resizer`, `progressHud`).
   - `tools/planExecutor.js` – Multi-step plan runner with save-as registry, variable resolver, telemetry logging.
   - `tools/registry.js`, `tools/mathAggregate.js`, `tools/sandboxRunner.js` – Tool definitions (clock, sandbox, math aggregate) plus the secure worker harness.
   - `utils/*.js` – Shared helpers (DOM, perf, JSON repair, template hydration, deep-path access, text formatting).
@@ -20,11 +21,11 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 ## Runtime Flow (Iterative Worker)
 
 1. **Diagnose** – `handleSend()` captures the user's question, logs it in chat, clears the thinking panel, and disables inputs so only one action runs at a time.
-2. **Plan** – Gemini is prompted (see `getSystemPrompt()`) to return `restatement`, `visible_reply`, `thinking_log[]`, and a `tool_plan[]`. We parse/repair JSON strictly before touching the UI.
+2. **Plan** – Gemini is prompted (see `getSystemPrompt()`) to return `restatement`, `visible_reply`, `thinking_log[]`, and a `tool_plan[]`. Before each call we query IndexedDB for the latest turn (intent + plan + short history) and stream it into the payload so phrases like “same but 24 months” automatically inherit the prior parameters. We parse/repair JSON strictly before touching the UI.
 3. **Execute** – `renderLlmResponse()` streams the sanitized `tool_plan[]` into the plan executor, which now behaves like an iterative worker:
    - Every entry receives a unique `save_as`; when the model omits one we auto assign `_stepN` and log `[guard] auto save_as=_stepN` so telemetry shows how aliases were derived. Those ids power the Next Step board (badges flow Planned → Executing → Executed/Failed/Skipped).
    - Step args are deep-cloned and passed through a mini resolver so strings like `$tool.schedule.result.balance` or `$tool.sandbox.result.interestSeries` can borrow structured objects or arrays from earlier steps.
-   - Tool invocations run strictly sequentially; on each start we log `[tool] Step i/n <name> start`, update the timeline, and stamp the Tool Details drawer with resolved args.
+   - Tool invocations run strictly sequentially; on each start we log `[tool] Step i/n <name> start`, update the timeline + Progress HUD (status copy, progress bar, “active tool” chip), and stamp the Tool Details drawer with resolved args.
    - Failures halt the remainder of the plan, annotate skipped tasks, and surface a friendly summary (“Plan finished with issues”) while re-enabling chat input.
 4. **Log** – While a tool runs, the Thinking Log doubles as the timeline, detailing start/done/error events with measured durations, console logs, and guard notes (stringified objects, missing refs, security denials). The Tool Details drawer expands automatically for the active step so engineers can audit code/args/results without DevTools.
 5. **Verify** – Chat bubbles append `Step i/n · Result:` rows for every tool, visible replies hydrate placeholders (`{{tool_result.*}}` and `{{tool.someStep.result.*}}`), and `turn.toolRuns[]` stores `{ tool, save_as, argsRaw, argsResolved, startedAt, endedAt, timeMs, status, result|error }` for downstream telemetry. The Turn Summary Bar stays in sync with the collapsible panels and reflects aggregate tool counts/durations plus the final status badge.
@@ -43,12 +44,17 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 - **Save-as & dependency graph** – Every plan item may declare `save_as`. The executor assigns `_stepN` when missing (and logs `[guard] auto save_as=_stepN`), caches `{ result, status, error }`, and exposes them to later steps via `$tool.<save_as>.<path>` placeholders. Missing refs immediately raise `[guard] missing ref ...` and stop the plan.
 - **Placeholder hydration** – Replies can now mix legacy `{{tool_result.local}}` tokens (last tool result) with scoped placeholders like `{{tool.schedule.result.balance}}`. The hydrator walks nested paths and falls back to `unavailable` so user-facing text always reflects actual data.
 - **Telemetry** – Each tool run writes to `turn.toolRuns[]`, the thinking log (start/done/error/duration/logs), Tool Details, and the Next Step list in lockstep. Timeline rows cap previews to ~2 KB to keep the UI responsive even when sandbox code returns arrays.
+- **Result normalization** – After every successful tool run we clone the payload, hoist any `result.*` properties onto the top level, _and_ always expose a `.result` snapshot (even if the tool returned a flat object) so `{{tool_result.local}}`, `{{tool_result.result.local}}`, and `{{tool.someStep.result.balance}}` all hydrate consistently.
 - **Failure handling** – Any error (bad args, forbidden API, timeout) halts the plan, stamps the remaining steps as `Skipped`, reuses the fallback placeholder value (`unavailable`), and leaves Tool Details expanded on the point-of-failure entry for quick debugging.
 
 ## UI / UX Notes
 
 - **Assistant resizer** – Accessible drag/keyboard resizing between main content and assistant sidebar with live logging (`[layout] ...`). Width is clamped between 280–640px.
 - **Turn Summary Bar** – Every assistant reply begins with a single-line bar that shows the inferred intent (with icon), plan status (Planned/Executed/Failed badge), aggregate tool usage (`js.run_sandbox ×2`), total tool duration, and the local timestamp. The whole bar is a button (Enter/Space friendly) that toggles the Thinking Log + Tool Details panes in sync so users can jump between “skim view” and “full telemetry” without hunting for separate controls.
+- **Agent Insights toggle** – The sidebar telemetry (Thinking Log, Next Step board, Tool Details) now nests under a collapsible “Agent Insights” header (collapsed by default, state persisted via `localStorage`) so operators can click “Show details” only when they need the extra context, keeping the chat stream roomy by default.
+- **Progress HUD** – A new execution panel (managed by `ui/progressHud.js`) sits above the chat log, announcing the current status (“Listening”/“Executing step”/“Plan complete”), tracking how many steps finished, and rendering an active-tool pill plus a live progress bar so PMs can glance at sequencing without opening Tool Details.
+- **Chat + composer polish** – Assistant/user bubbles now use elevated cards, tool result chips, and improved typography, while the composer adopts a glassmorphic tray with focus shadows so the whole agent reads like a modern cockpit instead of a stack of raw `<div>`s.
+- **Clear Memory control** – The header now includes a “Clear Memory” button that wipes the IndexedDB store and logs `[log] Conversation memory cleared…`, giving users a quick way to reset context if the agent drifts.
 - **Timeline = Thinking Log** – The `<ul>` in the sidebar doubles as a chronological trace of LLM reasoning plus system/tool events, so observers can audit decisions without checking devtools. The log header now has a Hide/Show toggle so users can collapse the trace when they only care about the final answer.
 - **Next Step card** – Shows the current `tool_plan` summary, spinner while executing, and final status (“Executed” / “Failed” / “Unsupported” / “No tool needed”). This mirrors the update_plan approach described in `context.md`.
 - **Tool Details drawer** – Each tool execution populates a collapsible panel with its metadata. For `js.run_sandbox` runs we render the exact code, args payload, timeout, logs, result, and guard notes so users can inspect what ran without opening DevTools.

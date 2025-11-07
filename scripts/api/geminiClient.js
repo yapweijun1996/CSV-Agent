@@ -1,6 +1,7 @@
 import { repairJson } from '../utils/jsonRepair.js';
+import { safeStringify } from '../utils/text.js';
 
-export async function callGeminiApi(userInput) {
+export async function callGeminiApi(userInput, memoryContext = {}) {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('Gemini API key not found. Please set it in Settings.');
@@ -10,13 +11,20 @@ export async function callGeminiApi(userInput) {
   const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const systemPrompt = getSystemPrompt();
 
+  const memoryPart = buildMemoryPart(memoryContext);
+
+  const parts = [
+    { text: systemPrompt },
+    { text: `User input: ${userInput}` }
+  ];
+  if (memoryPart) {
+    parts.push({ text: memoryPart });
+  }
+
   const payload = {
     contents: [
       {
-        parts: [
-          { text: systemPrompt },
-          { text: `User input: ${userInput}` }
-        ]
+        parts
       }
     ],
     generationConfig: {
@@ -52,6 +60,42 @@ export async function callGeminiApi(userInput) {
 
 function getApiKey() {
   return localStorage.getItem('gemini-api-key');
+}
+
+function buildMemoryPart(context) {
+  if (!context || typeof context !== 'object') {
+    return '';
+  }
+  const lines = [];
+  if (context.lastIntent) {
+    lines.push(`previous_intent: ${context.lastIntent}`);
+  }
+  if (Array.isArray(context.lastToolPlan) && context.lastToolPlan.length) {
+    const planPreview = truncateText(safeStringify(context.lastToolPlan), 1200);
+    lines.push(`last_tool_plan: ${planPreview}`);
+  }
+  if (Array.isArray(context.history) && context.history.length) {
+    lines.push('recent_turns:');
+    context.history.forEach((entry, index) => {
+      const userLine = truncateText(entry.userInput || '', 200);
+      const replyLine = truncateText(entry.visibleReply || '', 200);
+      lines.push(`${index + 1}. user="${userLine}" -> reply="${replyLine}"`);
+    });
+  }
+  if (!lines.length) {
+    return '';
+  }
+  return [
+    'Memory context (reuse parameters unless user overrides):',
+    ...lines
+  ].join('\n');
+}
+
+function truncateText(text, maxLength) {
+  if (!text) return '';
+  const str = String(text);
+  if (str.length <= maxLength) return str;
+  return `${str.slice(0, maxLength)}...`;
 }
 
 function safeGet(root, path, label) {

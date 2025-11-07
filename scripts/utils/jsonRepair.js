@@ -9,7 +9,13 @@ export function repairJson(malformedJson) {
   }
 
   const candidate = malformedJson.slice(startIndex, endIndex + 1);
-  const attempts = [candidate, ...generateJsonRepairCandidates(candidate)];
+  const normalized = stripNonAsciiOutsideStrings(candidate);
+  const attempts = uniqueStrings([
+    candidate,
+    normalized,
+    ...generateJsonRepairCandidates(normalized),
+    ...generateJsonRepairCandidates(candidate)
+  ]);
   let lastError = null;
 
   for (const attempt of attempts) {
@@ -49,6 +55,18 @@ function generateJsonRepairCandidates(text) {
   }
 
   return variants;
+}
+
+function uniqueStrings(list) {
+  const seen = new Set();
+  const result = [];
+  list.forEach((item) => {
+    if (typeof item !== 'string') return;
+    if (seen.has(item)) return;
+    seen.add(item);
+    result.push(item);
+  });
+  return result;
 }
 
 function removeDanglingCommas(input) {
@@ -132,4 +150,45 @@ function isLikelyValueStart(char) {
     char === 'f' ||
     char === 'n'
   );
+}
+
+function stripNonAsciiOutsideStrings(text) {
+  if (typeof text !== 'string') return text;
+  let inString = false;
+  let escape = false;
+  let changed = false;
+  let result = '';
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      result += char;
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (char === '\\') {
+        escape = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      result += char;
+      continue;
+    }
+
+    if (char.charCodeAt(0) > 127) {
+      changed = true;
+      continue;
+    }
+    result += char;
+  }
+
+  return changed ? result : text;
 }

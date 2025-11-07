@@ -12,6 +12,7 @@
   <h1>CSV Analysis Agent</h1>
   <div class="header-actions">
     <button id="settings-btn" class="btn">Settings</button>
+    <button id="clear-memory-btn" class="btn btn-secondary">Clear Memory</button>
     <button id="hide-assistant-btn" class="btn">Hide Assistant</button>
   </div>
 </header>
@@ -56,7 +57,19 @@
     <div class="message-list" id="message-list">
       <!-- Messages will be dynamically inserted here -->
     </div>
-    <div class="assistant-thinking-panel">
+    <div class="assistant-thinking-panel" id="assistant-thinking-panel">
+      <div class="insights-toggle-bar">
+        <h4>Agent Insights</h4>
+        <button
+          id="insights-panel-toggle"
+          class="toggle-btn insights-panel-toggle"
+          type="button"
+          aria-expanded="true"
+          aria-controls="assistant-thinking-body">
+          Hide details
+        </button>
+      </div>
+      <div class="assistant-thinking-body" id="assistant-thinking-body">
       <div class="timeline" id="timeline">
         <div class="section-header">
           <h4>Thinking Log</h4>
@@ -87,6 +100,7 @@
         <div class="collapsible is-collapsed tool-details-body" id="tool-details-body" aria-hidden="true">
           <p class="tool-details-empty">No tool executions yet.</p>
         </div>
+      </div>
       </div>
     </div>
     <div class="chat-input-area">

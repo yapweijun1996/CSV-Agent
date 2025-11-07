@@ -231,19 +231,16 @@ async function runSinglePlanStep(planEntry, runtime, toolRegistry) {
       stringified: Boolean(rawResult?.stringified)
     });
 
-    runtime.namedResults.set(stepInfo.id, {
-      result: rawResult,
-      status: 'succeeded',
-      tool: resolvedTool.name
-    });
+    const placeholderRecord = createNamedResultRecord(resolvedTool.name, rawResult);
+    runtime.namedResults.set(stepInfo.id, placeholderRecord);
     runtime.hud?.setStepResult?.({
       stepNumber: stepInfo.index + 1,
       status: 'succeeded'
     });
-    runtime.setLastToolResult(rawResult);
+    runtime.setLastToolResult(placeholderRecord);
     hydrateReply(runtime, {
       namedResults: runtime.namedResults,
-      lastToolResult: rawResult
+      lastToolResult: placeholderRecord
     });
     return 'succeeded';
   } catch (error) {
@@ -370,6 +367,43 @@ function markRemainingStepsAsSkipped(planSteps, startIndex, planPanel) {
       message: 'Skipped due to earlier failure'
     });
   }
+}
+
+function createNamedResultRecord(toolName, rawResult) {
+  const placeholderPayload = buildPlaceholderPayload(rawResult);
+  return {
+    ...placeholderPayload,
+    tool: toolName,
+    status: 'succeeded'
+  };
+}
+
+function buildPlaceholderPayload(rawResult) {
+  if (rawResult === null || rawResult === undefined) {
+    return { value: rawResult, result: rawResult };
+  }
+  if (Array.isArray(rawResult)) {
+    const clone = rawResult.slice();
+    if (clone.result === undefined) {
+      clone.result = Array.isArray(rawResult.result) ? rawResult.result.slice() : rawResult.slice();
+    }
+    return clone;
+  }
+  if (typeof rawResult !== 'object') {
+    return { value: rawResult, result: rawResult };
+  }
+  const clone = { ...rawResult };
+  if (rawResult.result && typeof rawResult.result === 'object' && !Array.isArray(rawResult.result)) {
+    Object.entries(rawResult.result).forEach(([key, value]) => {
+      if (!(key in clone)) {
+        clone[key] = value;
+      }
+    });
+  }
+  if (clone.result === undefined) {
+    clone.result = rawResult;
+  }
+  return clone;
 }
 
 function resolveArgReferences(args, namedResults) {
