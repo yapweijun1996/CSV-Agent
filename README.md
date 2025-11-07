@@ -20,6 +20,11 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 4. **Log** – While a tool runs, Next Step shows `Tool: <name>` plus a micro spinner. Once finished it flips to `Executed:` or `Failed:`. Thinking log entries append `[tool]`, `[decide]`, `[warn]`, or `[error]` markers so the user sees exactly what happened. Each turn stores a `toolRuns[]` record in memory for debugging.
 5. **Verify** – Chat messages append a `Result: …` line (local time or `unavailable` on failure), the timeline notes `[tool] get_current_date → …` and either `[decide] fulfilled` or `[error] get_current_date failed`, and inputs are re-enabled for the next prompt.
 
+## Response Guardrails
+
+- **`safeGet()` path validator** – `callGeminiApi()` now walks `candidates[0].content.parts[0].text` via a shared helper that throws `非預期回應` whenever Gemini returns a refusal/safety card without those fields. This keeps the UI from attempting to read `undefined.text` and lets the same error path surface a clear message to users.
+- **JSON repair fallback** – If the returned text is malformed JSON, we still slice between the first `{` and last `}` and retry parsing before showing an error bubble.
+
 ## Tool Execution Details
 
 - **Registry** – Defined in `script.js` (`TOOL_REGISTRY`). Only `get_current_date` exists today, returning `{ iso, local, epochMs }`. Alias mapping supports `get_current_date`, `clock.now`, `time.now`, and `get_time`.

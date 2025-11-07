@@ -272,23 +272,29 @@ document.addEventListener('DOMContentLoaded', () => {
    */
   function getSystemPrompt() {
     return `You are the dialogue layer for an "ERP CSV Analyses Agent".
-Your response MUST be a single, valid JSON object. Do not include any other text, explanations, or markdown formatting like \`\`\`json.
-
-Your task is to:
-1.  Restate the user's request in the 'restatement' field.
-2.  Produce a user-readable reply in the 'visible_reply' field.
-3.  Generate a brief, step-by-step thinking process in the 'thinking_log' array (e.g., "[read]...", "[intent]...", "[plan]...", "[decide]...").
-4.  Create a tool plan in the 'tool_plan' array. This plan is for display only and will not be executed. Indicate if a tool is needed ('need_tool': true/false) and provide a reason.
-
-The JSON structure must strictly follow this format:
+Your entire output MUST be a single JSON object (no prose, no markdown fences). Use this schema exactly:
 {
   "restatement": "string",
   "visible_reply": "string",
-  "thinking_log": ["string", "string", ...],
+  "thinking_log": ["string", "..."],
   "tool_plan": [
     { "need_tool": boolean, "tool": "string (optional)", "reason": "string" }
   ]
-}`;
+}
+
+Guidelines:
+1. Restate the user's intent in 'restatement'.
+2. 'visible_reply' must be what the user will read. When you expect a tool result, reference placeholders so the host can inject data, e.g. "Current time is {{tool_result.local}} (ISO: {{tool_result.iso}})."
+3. 'thinking_log' is a concise step-by-step trace using bracketed tags such as "[read] ...", "[intent] ...", "[plan] ...", "[decide] ...".
+4. 'tool_plan' ALWAYS contains at least one object describing your next action.
+
+About tools:
+- Any tool you list WILL be executed by the host system. Do not claim you lack real-time capabilities; rely on the tool output instead.
+- Supported tool ids: "get_current_date", "clock.now", "time.now", "get_time" (these are aliases of the same clock tool). Pick one of them whenever the user asks for the current date/time.
+- When no tool is needed, set "need_tool": false and clearly explain why in "reason".
+- When a tool is needed, set "need_tool": true, specify the tool id, and describe what data you expect to place into the visible reply via {{tool_result.local}} / {{tool_result.iso}} / {{tool_result.epochMs}} placeholders.
+
+Never return explanatory text outside the JSON object.`;
   }
 
   /**
@@ -309,6 +315,30 @@ The JSON structure must strictly follow this format:
       console.error("JSON repair failed:", e);
       return null;
     }
+  }
+
+  /**
+   * Safely walks nested properties/indices on the Gemini response.
+   * @param {object} root - The value to traverse.
+   * @param {Array<string|number>} path - Ordered list of keys/indices.
+   * @param {string} [label] - Human readable path for error messaging.
+   * @returns {*} - The resolved value.
+   */
+  function safeGet(root, path, label) {
+    if (!Array.isArray(path) || path.length === 0) {
+      throw new Error('非預期回應：path 參數無效');
+    }
+
+    let current = root;
+    for (const rawKey of path) {
+      const key = typeof rawKey === 'number' ? rawKey : String(rawKey);
+      if (current === null || current === undefined || !(key in current)) {
+        const humanReadable = label || path.join('.');
+        throw new Error(`非預期回應：缺少 ${humanReadable}`);
+      }
+      current = current[key];
+    }
+    return current;
   }
 
   /**
@@ -354,8 +384,19 @@ The JSON structure must strictly follow this format:
     }
 
     const responseData = await response.json();
-    // In JSON mode, the response is a string that needs to be parsed.
-    const jsonString = responseData.candidates[0].content.parts[0].text;
+
+    let jsonString;
+    try {
+      // In JSON mode, the response is a string that needs to be parsed.
+      jsonString = safeGet(
+        responseData,
+        ['candidates', 0, 'content', 'parts', 0, 'text'],
+        'candidates[0].content.parts[0].text'
+      );
+    } catch (structureError) {
+      console.error('Gemini response missing required fields:', structureError, responseData);
+      throw new Error('非預期回應：請稍後再試。');
+    }
 
     try {
       return JSON.parse(jsonString);
@@ -402,6 +443,7 @@ The JSON structure must strictly follow this format:
     const replyDiv = document.createElement('div');
     replyDiv.className = 'visible-reply';
     replyDiv.textContent = response.visible_reply;
+    replyDiv.dataset.template = response.visible_reply || '';
 
     const toolResultDiv = document.createElement('div');
     toolResultDiv.className = 'tool-result';
@@ -448,7 +490,8 @@ The JSON structure must strictly follow this format:
 
     await executeToolWithUi(resolvedTool.name, planEntry.reason, {
       turn,
-      toolResultDiv
+      toolResultDiv,
+      replyElement: replyDiv
     });
     finishTurn(turn);
   }
@@ -512,6 +555,7 @@ The JSON structure must strictly follow this format:
       appendThinkingLogEntry('[decide] fulfilled');
       revealToolResult(context.toolResultDiv, readable, false);
       showToolPlanExecuted(toolName);
+      updateVisibleReplyWithToolResult(context.replyElement, result);
     } catch (error) {
       console.error(`Tool ${toolName} failed:`, error);
       context.turn.toolRuns[context.turn.toolRuns.length - 1] = {
@@ -522,6 +566,7 @@ The JSON structure must strictly follow this format:
       appendThinkingLogEntry(`[error] ${toolName} failed`);
       revealToolResult(context.toolResultDiv, 'unavailable', true);
       showToolPlanFailure(toolName);
+      updateVisibleReplyWithToolResult(context.replyElement, null, { fallbackValue: 'unavailable' });
     }
   }
 
@@ -604,6 +649,36 @@ The JSON structure must strictly follow this format:
     } else {
       element.classList.remove('is-error');
     }
+  }
+
+  function updateVisibleReplyWithToolResult(element, toolResult, options = {}) {
+    if (!element) return;
+    const template = element.dataset.template || element.textContent || '';
+    if (typeof template !== 'string' || template.length === 0) {
+      return;
+    }
+    const fallbackValue = options.fallbackValue || 'unavailable';
+    const hydrated = applyToolResultPlaceholders(template, toolResult, fallbackValue);
+    element.textContent = hydrated;
+  }
+
+  function applyToolResultPlaceholders(template, toolResult, fallbackValue = 'unavailable') {
+    if (typeof template !== 'string' || template.length === 0) {
+      return template;
+    }
+    const safeResult = toolResult || {};
+    const PLACEHOLDER_REGEX = /\{\{\s*tool_result\.([a-zA-Z0-9_]+)\s*\}\}/g;
+    return template.replace(PLACEHOLDER_REGEX, (_, rawKey) => {
+      const key = rawKey.trim();
+      if (!key) {
+        return fallbackValue;
+      }
+      const value = safeResult[key];
+      if (value === undefined || value === null) {
+        return fallbackValue;
+      }
+      return String(value);
+    });
   }
 
   function formatToolResult(result) {

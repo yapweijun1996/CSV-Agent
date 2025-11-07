@@ -105,6 +105,7 @@ body.is-resizing {
   height: 100%;
   background: #f1f5f9; /* Slight tint to distinguish */
   padding: 0; /* Remove padding to allow full height chat */
+  overflow: auto; /* Make sidebar scrollable */
 }
   .message-list {
     flex: 1;

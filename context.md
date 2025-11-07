@@ -2,22 +2,28 @@
 
 ## Goal
 
-Turn the previously decorative `tool_plan` into a real workflow: when Gemini asks for a supported tool (currently `get_current_date` and its aliases), the frontend executes it, logs the run, and feeds the result back into chat/timeline/next-step components with proper UX states/spinners/error handling.
+Convert the previously decorative `tool_plan` into an actual multi-step workflow: when Gemini decides a supported tool is needed (e.g., current date/time), the frontend executes it, writes the result back into chat, timeline, and the Next Step card, and keeps everything observable for engineers.
 
 ## TODO
 
-- [x] Audit current UI/state handling for chat, thinking log, and tool plan rendering.
-- [x] Implement the date/time tool registry, alias mapping, execution spinner, chat result injection, and timeline logging in `script.js` + styling/markup tweaks.
-- [x] Document the architecture/flow in `README.md` so future engineers know how the agent plans, executes tools, and logs outcomes.
-- [ ] Run through acceptance tests (`today date`, repeated turns, unsupported tool) once the logic is stable.
+- [x] Audit the existing chat/thinking/plan rendering to understand current state handling.
+- [x] Implement `get_current_date` tool execution (alias mapping, thinking log updates, spinner UI, chat result lines).
+- [x] Document the architecture + flow inside `README.md`.
+- [x] Guard the Gemini response path with `safeGet()` so safety or refusal payloads surface「非預期回應」instead of crashing.
+- [ ] Run through the full acceptance tests (`today date` twice, “what time is it now?”, unsupported tool) to verify no turn leakage.
+- [x] Fix LLM prompt/contract so Gemini stops replying “I cannot provide real-time data” after we return a tool result; visible replies should reference the tool output.
 
 ## Notes
 
-- Tool aliases: `get_current_date`, `clock.now`, `time.now`, `get_time`. Missing tool names fall back via keyword intent detection (date/time in user ask, restatement, or plan reason).
-- Next Step card now shows spinner during execution and flips to `Executed: <tool>` or `Failed: <tool>` when done. Chat appends `Result: ...` lines and the timeline records `[tool] ...` + `[decide] fulfilled` or `[error] ... failed`.
-- We maintain an in-memory `turnHistory` with `toolRuns` arrays so each turn keeps its execution log for debugging.
+- Tool aliases: `get_current_date`, `clock.now`, `time.now`, `get_time`. Missing tool names fall back via keyword intent detection across the plan reason, restatement, reply, and original user input.
+- Thinking log doubles as the timeline. We append `[tool] …`, `[decide] fulfilled`, `[warn] …`, `[error] …` events so users can follow each step.
+- Next Step card now has spinner state (“Tool: …”), success (“Executed: …”), failure (“Failed: …”), and unsupported tool messaging.
+- Each chat turn stores a `toolRuns[]` array in memory for potential debugging/telemetry later.
+- `safeGet()` (in `script.js`) replaces direct `candidates[0].content.parts[0].text` access; any missing leg logs to console and throws an error bubble so JSON repair / UI handling stays consistent.
 
 ## Progress
 
-- `index.html` and `style.css` gained spinner markup/styles along with message-level `tool-result` rows.
-- `script.js` now runs `get_current_date`, pushes results/errors into chat + timeline, supports alias mapping + intent inference, and keeps the UI responsive (disable inputs, show spinner, re-enable after run).
+- UI changes (spinner markup, `tool-result` rows) plus the JS execution path are live.
+- Prompt now states tools WILL run, forbids “no real-time data” apologies, and tells Gemini to place placeholders such as {{tool_result.local}} / {{tool_result.iso}} inside `visible_reply` when a tool outcome is expected.
+- Added placeholder hydration: once a tool succeeds (or fails), we replace `{{tool_result.*}}` tokens inside `visible_reply` with the actual result or `unavailable`, keeping the chat bubble consistent with the Result line.
+- Added robust response parsing guardrails so safety/blocked replies raise “非預期回應” instead of throwing `Cannot read properties of undefined`.
