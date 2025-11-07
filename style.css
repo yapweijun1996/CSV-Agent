@@ -162,7 +162,11 @@ body.is-resizing {
     background: #e0e7ff;
     color: #3730a3;
   }
-  .turn-summary-status.is-executed {
+  .turn-summary-status.is-executing {
+    background: #fee2e2;
+    color: #9a3412;
+  }
+  .turn-summary-status.is-succeeded {
     background: #dcfce7;
     color: #166534;
   }
@@ -402,39 +406,97 @@ input:checked + .slider:before {
   background-color: var(--border);
 }
 
-#tool-plan-content {
-  font-size: 13px;
-  background: #eef2ff;
-  padding: 8px 12px;
-  border-radius: 8px;
-  color: #4338ca;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
+.plan-summary-chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: #3730a3;
+  background: #e0e7ff;
+  padding: 4px 10px;
+  border-radius: 999px;
 }
 
-.inline-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(67, 56, 202, 0.3);
-  border-top-color: #4338ca;
-  border-radius: 50%;
-  animation: spin 0.85s linear infinite;
+.plan-step-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-step {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 12px;
+}
+
+.plan-step-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plan-step-status {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.plan-status-pending { background: #e2e8f0; color: #1f2937; }
+.plan-status-executing { background: #fef3c7; color: #92400e; }
+.plan-status-succeeded { background: #dcfce7; color: #166534; }
+.plan-status-failed { background: #fee2e2; color: #b91c1c; }
+.plan-status-skipped { background: #e5e7eb; color: #4b5563; }
+
+.plan-step-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.plan-step-meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.plan-step-body {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.plan-step-body.is-collapsed {
   display: none;
 }
 
-.inline-spinner.is-visible {
-  display: inline-block;
+.plan-step-block {
+  margin-top: 8px;
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+.plan-step-block pre {
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 6px;
+  border-radius: 6px;
+  font-family: "Fira Code", "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.plan-placeholder {
+  text-align: center;
+  color: var(--muted);
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.tool-result-stack {
+  display: flex;
+  flex-direction: column;
 }
 
 .message .restatement {

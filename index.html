@@ -48,11 +48,13 @@
         </div>
       </div>
       <div class="tool-plan" id="tool-plan">
-        <h4>Next Step</h4>
-        <p id="tool-plan-content">
-          <span id="tool-plan-text">No next step determined.</span>
-          <span id="tool-plan-spinner" class="inline-spinner" aria-hidden="true"></span>
-        </p>
+        <div class="section-header">
+          <h4>Next Step</h4>
+          <span id="tool-plan-summary" class="plan-summary-chip">Awaiting plan...</span>
+        </div>
+        <ol id="tool-plan-list" class="plan-step-list">
+          <li class="plan-placeholder">No next step determined.</li>
+        </ol>
       </div>
       <div class="tool-details" id="tool-details">
         <div class="section-header">
@@ -118,6 +120,6 @@
   </div>
 </div>
 
-<script src="script.js"></script>
+<script type="module" src="scripts/app.js"></script>
 
 </html>

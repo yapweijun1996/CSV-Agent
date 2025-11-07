@@ -1,55 +1,36 @@
-# CSV Agent - Tool Execution Upgrade + Turn Summary Bar
+# CSV Agent – Multi-Step Tool Runner Upgrade
 
 ## Goal
 
-Convert the previously decorative `tool_plan` into an actual multi-step workflow: when Gemini decides a supported tool is needed (e.g., current date/time), the frontend executes it, writes the result back into chat, timeline, and the Next Step card, and keeps everything observable for engineers. The runner now needs to process every plan entry sequentially (Step i/n), log outcomes, and surface stacked results so multi-tool tasks stay debuggable. New requirement: surface a “Turn Summary Bar” per assistant response so users can skim intent/status/tool usage/duration/timestamp, and use it as a toggle for the detailed panels.
+Deliver a Vanilla JS front-end that acts like a transparent, iterative worker: the agent must execute every `tool_plan` step sequentially, support `save_as` aliases + `$tool.*` references, hydrate named placeholders in the visible reply, and surface a detailed audit trail (thinking log, plan board, tool details, summary bar) while keeping the codebase modular (`type="module"`, single-responsibility files ≤300 lines).
 
 ## TODO
 
-- [x] Promote `tool_plan[]` into a sequential runner that walks every step and updates the Next Step card with `Step i/n`.
-- [x] Stack per-step `Result:` rows + tool detail entries so engineers can audit multi-tool turns.
-- [x] Audit the existing chat/thinking/plan rendering to understand current state handling.
-- [x] Implement `get_current_date` tool execution (alias mapping, thinking log updates, spinner UI, chat result lines).
-- [x] Document the architecture + flow inside `README.md`.
-- [x] Guard the Gemini response path with `safeGet()` so safety or refusal payloads surface「非預期回應」instead of crashing.
-- [ ] Run through the full acceptance tests (`today date` twice, “what time is it now?”, unsupported tool) to verify no turn leakage.
-- [x] Fix LLM prompt/contract so Gemini stops replying “I cannot provide real-time data” after we return a tool result; visible replies should reference the tool output.
-- [x] Harden the system prompt again so time/date requests MUST return a tool plan and can’t respond with “no real-time data”.
-- [x] Add `validateGeminiResponse()` schema enforcement (#5) so malformed responses fail fast on the frontend.
-- [x] Add `js.run_sandbox` worker sandbox (code≤500 chars, timeout guard, denied APIs) plus UI hydration/logging.
-- [ ] Smoke test multi-step plan scenarios (no-tool step, 2+ tool steps, failure) to ensure the new runner/UI wiring holds up.
-- [ ] Run sandbox acceptance matrix (math, args injection, console log capture, forbidden API, timeout, object result) once UI is wired.
-- [x] Add Turn Summary Bar UI with intent/status/tools/duration/timestamp plus toggle wiring to Thinking Log + Tool Details.
-- [x] Polish the Turn Summary Bar responsive layout so the summary pills stay readable on narrow widths (wrap behavior, separator handling).
+- [x] Split the legacy 1.8k-line script into ES modules (`scripts/` tree) covering API, state, UI, tooling, and utilities.
+- [x] Replace the Next Step text block with a multi-step board showing Planned → Executing → Executed/Failed/Skipped (with badges + auto-expansion).
+- [x] Implement the save-as registry, `$tool.<alias>.<path>` resolver, sequential runner, and halt-on-failure guardrails.
+- [x] Hydrate replies with both `{{tool_result.*}}` (last result) and `{{tool.<alias>.*}}`, plus fallback `unavailable`.
+- [x] Update README + context to document the new architecture/contract so future engineers can maintain it cheaply.
+- [ ] Manual QA: run the savings-projection scenario (clock + sandbox + aggregate), zero-deposit case, and forced failure (bad code / timeout) once time permits.
+- [ ] Visual polish backlog: micro-transitions on plan badges + detail drawer, dark-mode tokens.
 
 ## Notes
 
-
-## Notes
-
-- Tool aliases: `get_current_date`, `clock.now`, `time.now`, `get_time`. Missing tool names fall back via keyword intent detection across the plan reason, restatement, reply, and original user input.
-- Thinking log doubles as the timeline. We append `[tool] …`, `[decide] fulfilled`, `[warn] …`, `[error] …` events so users can follow each step.
-- Next Step card now has spinner state (“Tool: …”), success (“Executed: …”), failure (“Failed: …”), unsupported tool messaging, plus `Step i/n` prefixes and an overall “Plan finished with issues” summary whenever any step fails.
-- Each chat turn stores a `toolRuns[]` array in memory for potential debugging/telemetry later.
-- `safeGet()` (in `script.js`) replaces direct `candidates[0].content.parts[0].text` access; any missing leg logs to console and throws an error bubble so JSON repair / UI handling stays consistent.
-- `validateGeminiResponse()` rejects any payload missing string fields, string thinking logs, or at least one valid `{ need_tool, reason }` entry before rendering.
-- Prompt text now threatens contract failure if Gemini tries to dodge real-time requests or forgets to name an allowed tool id when `need_tool=true`.
-- `js.run_sandbox` sanitizes plan args, deep clones data, spawns a dedicated worker with fetch/XMLHttpRequest/WebSocket/importScripts/indexedDB/caches removed, disables `navigator`, freezes allowed globals, captures console output, and enforces termination on timeout so snippets stay compute-only.
-- Timeline now emits `[tool] <name> start`, `[tool] <name> → …`, `[log] …` (when console output exists), `[guard] stringified result` for non-primitive returns, and `[error] <name> <code>` when the sandbox blocks a call or hits timeout.
-- Fixed the system prompt literal so inline instructions use quotes instead of backticks ("return")—prevents `SyntaxError: unexpected token: keyword 'return'` at load time.
-- Thinking log UI gained a hide/show toggle, and a new Tool Details drawer surfaces the exact sandbox code, args, logs, and results (with guard notes) so users can audit executions without digging into DevTools.
-- JSON repair now chains extra heuristics (remove trailing commas, auto-insert missing commas between adjacent string literals) so LLM typos like missing `,` inside `thinking_log` arrays no longer crash the turn.
-- Turn Summary Bar derives intent from the LLM payload (restatement/plan/tool ids), summarizes tool usage counts, sums tool duration (fallback to measured runtime), shows the local timestamp, displays status badges (executed/failed/planned), and exposes an accessible toggle that syncs Thinking Log + Tool Details visibility.
+- Each plan step is assigned `save_as` (auto `_stepN` if missing) and rendered in `tool_plan_list`; badges change color as states evolve and the active row expands to show reasoning + resolved args.
+- The arg resolver walks nested objects/arrays, replacing strings shaped like `$tool.alias.path` with actual values from earlier runs. Missing refs emit `[guard] missing ref …` and abort the plan.
+- `turn.toolRuns[]` now captures `{ tool, saveAs, argsRaw, argsResolved, startedAt, endedAt, timeMs, status, result|error }` and drives both the Tool Details drawer and any future telemetry hook-ups.
+- The Thinking Log doubles as the timeline; we log `[plan]`, `[tool]`, `[log]`, `[guard]`, `[error]`, and `[decide]` markers so QA can replay every decision without devtools.
+- Summary bar buttons stay synced with the collapsible panels (clicking either toggles Thinking Log + Tool Details in lockstep, with the same expanded state mirrored via `aria-expanded`).
+- `scripts/tools/sandboxRunner.js` removes network/storage APIs, freezes globals, and stringifies non-primitives so sandbox results can safely flow through placeholders/UI.
+- Sandbox snippet cap raised to 1000 characters (was 500) so compound-interest style snippets no longer trip the guard; docs + system prompt updated accordingly.
 
 ## Progress
 
-- UI changes (spinner markup, `tool-result` rows) plus the JS execution path are live.
-- Prompt now states tools WILL run, forbids “no real-time data” apologies, and tells Gemini to place placeholders such as {{tool_result.local}} / {{tool_result.iso}} inside `visible_reply` when a tool outcome is expected.
-- Added schema validation plus stricter prompt rules to keep time/date questions flowing through the actual tool with no “I can’t” replies.
-- Added placeholder hydration: once a tool succeeds (or fails), we replace `{{tool_result.*}}` tokens inside `visible_reply` with the actual result or `unavailable`, keeping the chat bubble consistent with the Result line.
-- Added robust response parsing guardrails so safety/blocked replies raise “非預期回應” instead of throwing `Cannot read properties of undefined`.
-- Integrated `js.run_sandbox` end-to-end (prompt contract, argument validation, worker sandbox, timeout, log capture, UI timeline, README updates) so compute snippets can run safely inside the browser.
-- Added collapsible controls for the thinking log and a tool details panel that renders sandbox code payloads, execution metadata, and guard notes for each run. The drawer now appends entries instead of replacing them, so multiple tool executions stay visible.
-- The plan executor (`runToolPlan` + `runSinglePlanStep`) now iterates through every LLM step, logs `Step i/n - …`, pushes individual result rows, and downgrades the plan card to “Plan finished with issues” if any tool fails.
-- Added the Turn Summary Bar with aggregated intent/status/tool/duration/timestamp plus synchronized collapsible control for Thinking Log + Tool Details.
-- Added responsive CSS so the summary pills wrap gracefully: flex-wrap on the bar, normal white-space, and a mobile breakpoint (<520px) that stacks items vertically and hides separators.
+- Modularized the frontend into `scripts/` (app orchestrator, UI controllers, state, API, tools, utils) and updated `index.html` to load the entry module.
+- Built the multi-step board UI (status chips, reason/arg blocks, skipped markers) and the new CSS tokens to keep each file under 20 KB.
+- Added the named-result registry + resolver, template hydration for `{{tool.<alias>.*}}`, and a `$tool`-aware arg sanitizer so later steps can safely reuse earlier outputs.
+- Instrumented timeline + summary telemetry: each step logs start/done/error (with durations, console logs, guard notes) and the summary aggregates tool counts/durations with live badges.
+- Tool Details now auto-expands for the active run, rendering code/args/result/logs/errors while keeping previous runs visible.
+- README/context refreshed with the new architecture, tool contract, and outstanding QA TODOs so the next engineer immediately understands the flow.
+- Fixed the `replyEl` reference bug in `scripts/ui/chatView.js` so assistant replies hydrate correctly instead of throwing `ReferenceError: replyEl is not defined`.
+- Resolved `resolveArgReferences` destructuring typo in `scripts/tools/planExecutor.js`, ensuring sandbox plans retain their `args.code` payload instead of tripping the `js.run_sandbox 需要 code 字串` guard.

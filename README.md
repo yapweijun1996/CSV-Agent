@@ -4,9 +4,16 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 
 ## Layout & Files
 
-- `index.html` – Static layout for the workspace, assistant sidebar, resizer, chat area, timeline, and Next Step card plus a lightweight settings modal.
-- `style.css` – Tokens + component styles (sidebar layout, resizer affordance, thinking log timeline, inline spinner, tool-result rows).
-- `script.js` – All runtime logic: Gemini wiring, JSON repair, chat rendering, tool plan evaluation/execution, timeline logging, and resizer behaviors.
+- `index.html` – Static workspace layout (main panel, assistant sidebar, Next Step board, Tool Details drawer, settings modal) plus a single `<script type="module">` entry point.
+- `style.css` – Tokens + responsive component styles (summary pill, multi-step board, resizer, collapsible panels, tool-result stack).
+- `scripts/` – ES module tree, each file ≤200 lines and scoped to one role:
+  - `app.js` – Entry point that wires DOM events, Gemini calls, and tool execution.
+  - `api/geminiClient.js` – Fetch wrapper, system prompt, JSON repair, schema validation.
+  - `state/sessionState.js` – Turn bookkeeping + `toolRuns` mutations.
+  - `ui/*.js` – View-specific controllers (`chatView`, `thinkingLog`, `toolPlanPanel`, `toolDetailsDrawer`, `summaryBar`, `settingsModal`, `resizer`).
+  - `tools/planExecutor.js` – Multi-step plan runner with save-as registry, variable resolver, telemetry logging.
+  - `tools/registry.js` & `tools/sandboxRunner.js` – Tool definitions and secure worker harness.
+  - `utils/*.js` – Shared helpers (DOM, perf, JSON repair, template hydration, deep-path access, text formatting).
 - `context.md` – Live notebook containing the current goal/TODO/notes/progress for the engineering session.
 - `AGENTS.md` – Product rules and operating instructions the agent must follow.
 
@@ -14,13 +21,13 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 
 1. **Diagnose** – `handleSend()` captures the user's question, logs it in chat, clears the thinking panel, and disables inputs so only one action runs at a time.
 2. **Plan** – Gemini is prompted (see `getSystemPrompt()`) to return `restatement`, `visible_reply`, `thinking_log[]`, and a `tool_plan[]`. We parse/repair JSON strictly before touching the UI.
-3. **Execute** – `renderLlmResponse()` now hands the entire `tool_plan[]` to `runToolPlan()`, which works through every step sequentially (small-step worker style):
-   - Each step logs `Step i/n - …` into the thinking log so observers can trace progress.
-   - `need_tool=false` steps still surface their reasoning but short‑circuit without launching code.
-   - `need_tool=true` steps resolve the tool via alias mapping or keyword inference and call `executeToolWithUi()` with a spinner + status scoped to that step.
-   - Unsupported plans/failed runs mark the step as failed and the plan summary card flips to “Plan finished with issues”.
-4. **Log** – While a tool runs, Next Step shows `Tool: <name>` plus a micro spinner. Once finished it flips to `Executed:` or `Failed:`. Thinking log entries append `[tool]`, `[decide]`, `[warn]`, or `[error]` markers so the user sees exactly what happened. Each turn stores a `toolRuns[]` record in memory for debugging.
-5. **Verify** – Chat messages append a `Result: …` line (local time or `unavailable` on failure), the timeline notes `[tool] get_current_date → …` and either `[decide] fulfilled` or `[error] get_current_date failed`, and inputs are re-enabled for the next prompt. Each assistant bubble now leads with a Turn Summary Bar (intent + status + tools + duration + timestamp) so users can skim what just happened before diving into the details.
+3. **Execute** – `renderLlmResponse()` streams the sanitized `tool_plan[]` into the plan executor, which now behaves like an iterative worker:
+   - Every entry receives a unique `save_as` (auto `_stepN` if missing) and renders inside the Next Step list with a badge that flows Planned → Executing → Executed/Failed/Skipped.
+   - Step args are deep-cloned and passed through a mini resolver so strings like `$tool.schedule.result.balance` can borrow results from earlier steps.
+   - Tool invocations run strictly sequentially; on each start we log `[tool] Step i/n <name> start`, update the timeline, and stamp the Tool Details drawer with resolved args.
+   - Failures halt the remainder of the plan, annotate skipped tasks, and surface a friendly summary (“Plan finished with issues”) while re-enabling chat input.
+4. **Log** – While a tool runs, the Thinking Log doubles as the timeline, detailing start/done/error events with measured durations, console logs, and guard notes (stringified objects, missing refs, security denials). The Tool Details drawer expands automatically for the active step so engineers can audit code/args/results without DevTools.
+5. **Verify** – Chat bubbles append `Step i/n · Result:` rows for every tool, visible replies hydrate placeholders (`{{tool_result.*}}` and `{{tool.someStep.result.*}}`), and `turn.toolRuns[]` stores `{ tool, saveAs, argsResolved, startedAt, endedAt, timeMs, status, result|error }` for downstream telemetry. The Turn Summary Bar stays in sync with the collapsible panels and reflects aggregate tool counts/durations plus the final status badge.
 
 ## Response Guardrails
 
@@ -31,13 +38,12 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 
 ## Tool Execution Details
 
-- **Registry** – Defined in `script.js` (`TOOL_REGISTRY`). `get_current_date` returns `{ iso, local, epochMs }` with alias mapping across `get_current_date`, `clock.now`, `time.now`, and `get_time`. New in this iteration: `js.run_sandbox`, a worker-backed compute tool for tiny math/array/data snippets.
-- **Sandbox tool** – The plan must provide `args: { code, args?, timeoutMs? }`. We enforce ≤500 chars of code, clamp the timeout to 50–1500 ms (default 500 ms), deep-clone any `args`, and run the snippet inside a dedicated Web Worker that deletes/blocks `fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `indexedDB`, `caches`, and `navigator`. Allowed globals (`Math`, `Date`, primitives, typed arrays, etc.) are frozen, console output is captured, and the worker auto-terminates on timeout. Results come back as `{ result, logs[], timeMs }` with non-primitive values JSON-stringified so the UI can drop `{{tool_result.result}}` directly into replies.
-- **Intent fallback** – When Gemini sets `need_tool=true` but omits the `tool` field, we scan the plan reason + restatement + reply + original user input for Chinese/English time keywords. If matched, the agent logs `[plan] 推斷時間意圖...` and routes to `get_current_date` automatically.
-- **Per-step UI states** – Every tool step renders its own `Result:` line (`Step i/n · Result: …`) under the assistant message, so multi-tool runs leave a visible breadcrumb trail. The Next Step card also includes the step prefix plus spinner/status, and the summary flips to “Plan finished with issues” whenever any step fails.
-- **UI contract** – Every tool run now logs `[tool] <name> start` followed by either `[tool] <name> → …` or `[error] <name> <code>`. Sandbox runs also append `[log] [...]` when console output exists and `[guard] stringified result` whenever we had to stringify a complex return value. Success updates the chat bubble (`Result: …`, placeholders hydrated), updates the Next Step card to `Executed: <name>`, and records `[decide] fulfilled`. Failures flip the card to `Failed`, mark the timeline with `[error] ...`, and show `Result: unavailable`.
-- **Unsupported tools** – Any non-whitelisted tool names emit `[warn] unsupported tool: <name>` in the timeline and keep the session stable so engineers can diagnose prompt issues without a crash.
-- **Turn summaries** – `executeToolWithUi()` now measures every run (success or failure), updates `turn.toolRuns[]`, and feeds a per-turn summary model that counts tools, accumulates duration, stamps the local time, and flips the status badge to Executed/Failed when the plan completes. This keeps the new Turn Summary Bar accurate even when multiple tools fire or one of them times out.
+- **Registry-first design** – `tools/registry.js` exposes pure tool definitions. Each entry returns `prepareInput()` (arg sanitization) and `run()` (async executor). `get_current_date` shares aliases across `get_current_date`, `clock.now`, `time.now`, `get_time`; `js.run_sandbox` funnels code through a hardened worker.
+- **Sandbox guardrails** – `tools/sandboxRunner.js` enforces ≤1000 char snippets, JSON-serializable args, and a 50–1500 ms timeout. Workers strip network/storage APIs, freeze whitelisted globals, capture console output, and stringify any complex return values so UI rendering stays safe.
+- **Save-as & dependency graph** – Every plan item may declare `save_as`. The executor assigns `_stepN` when missing, caches `{ result, status, error }`, and exposes them to later steps via `$tool.<save_as>.<path>` placeholders. Missing refs immediately raise `[guard] missing ref ...` and stop the plan.
+- **Placeholder hydration** – Replies can now mix legacy `{{tool_result.local}}` tokens (last tool result) with scoped placeholders like `{{tool.schedule.result.balance}}`. The hydrator walks nested paths and falls back to `unavailable` so user-facing text always reflects actual data.
+- **Telemetry** – Each tool run writes to `turn.toolRuns[]`, the thinking log (start/done/error/duration/logs), Tool Details, and the Next Step list in lockstep. Timeline rows cap previews to ~2 KB to keep the UI responsive even when sandbox code returns arrays.
+- **Failure handling** – Any error (bad args, forbidden API, timeout) halts the plan, stamps the remaining steps as `Skipped`, reuses the fallback placeholder value (`unavailable`), and leaves Tool Details expanded on the point-of-failure entry for quick debugging.
 
 ## UI / UX Notes
 
