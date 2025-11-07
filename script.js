@@ -40,6 +40,27 @@ document.addEventListener('DOMContentLoaded', () => {
     'clock'
   ];
 
+  const ARITHMETIC_INTENT_KEYWORDS = [
+    'calculate',
+    'calculation',
+    'sum',
+    'total',
+    'add',
+    'plus',
+    'subtract',
+    'minus',
+    'multiply',
+    'divide',
+    'product',
+    'quotient',
+    '平均',
+    '加',
+    '減',
+    '乘',
+    '除',
+    '總和'
+  ];
+
   const TOOL_REGISTRY = {
     get_current_date: {
       label: 'get_current_date',
@@ -66,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let activeTurn = null;
   const turnHistory = [];
+  const summaryToggleRegistry = new Set();
   
   // --- Settings Modal Elements ---
   const settingsBtn = document.getElementById('settings-btn');
@@ -248,14 +270,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function initializeCollapsible(container, toggleBtn, expandedByDefault) {
     if (!container || !toggleBtn) return;
-    toggleBtn.addEventListener('click', () => handleCollapsibleToggle(container, toggleBtn));
+    toggleBtn.addEventListener('click', () => {
+      handleCollapsibleToggle(container, toggleBtn);
+      if (isDetailPanel(container)) {
+        syncSummaryBarsWithDetails();
+      }
+    });
     setCollapsibleState(container, toggleBtn, expandedByDefault);
+    if (isDetailPanel(container)) {
+      syncSummaryBarsWithDetails();
+    }
   }
 
   function handleCollapsibleToggle(container, toggleBtn) {
     if (!container || !toggleBtn) return;
     const isExpanded = toggleBtn.getAttribute('aria-expanded') === 'true';
     setCollapsibleState(container, toggleBtn, !isExpanded);
+    if (isDetailPanel(container)) {
+      syncSummaryBarsWithDetails();
+    }
   }
 
   function setCollapsibleState(container, toggleBtn, expanded) {
@@ -264,6 +297,38 @@ document.addEventListener('DOMContentLoaded', () => {
     container.setAttribute('aria-hidden', expanded ? 'false' : 'true');
     toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     toggleBtn.textContent = expanded ? 'Hide' : 'Show';
+  }
+
+  function isDetailPanel(element) {
+    return element === thinkingLogBody || element === toolDetailsBody;
+  }
+
+  function areDetailPanelsExpanded() {
+    const thinkingExpanded = thinkingLogToggle?.getAttribute('aria-expanded') === 'true';
+    const toolExpanded = toolDetailsToggle?.getAttribute('aria-expanded') === 'true';
+    return Boolean(thinkingExpanded && toolExpanded);
+  }
+
+  function setDetailPanelsExpanded(expanded) {
+    if (thinkingLogBody && thinkingLogToggle) {
+      setCollapsibleState(thinkingLogBody, thinkingLogToggle, expanded);
+    }
+    if (toolDetailsBody && toolDetailsToggle) {
+      setCollapsibleState(toolDetailsBody, toolDetailsToggle, expanded);
+    }
+    syncSummaryBarsWithDetails();
+  }
+
+  function toggleDetailPanelsFromSummary() {
+    const nextState = !areDetailPanelsExpanded();
+    setDetailPanelsExpanded(nextState);
+  }
+
+  function syncSummaryBarsWithDetails() {
+    const expanded = areDetailPanelsExpanded();
+    summaryToggleRegistry.forEach((button) => {
+      button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    });
   }
 
   function clearToolDetails() {
@@ -614,6 +679,13 @@ Never return explanatory text outside the JSON object.`;
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message assistant';
 
+    const summaryData = createTurnSummaryData(response);
+    turn.summary = summaryData;
+    const summaryElements = renderTurnSummaryBar(summaryData);
+    summaryData.elements = summaryElements;
+    messageDiv.appendChild(summaryElements.root);
+    registerSummaryToggle(summaryElements.root);
+
     const restatementDiv = document.createElement('div');
     restatementDiv.className = 'restatement';
     restatementDiv.textContent = response.restatement;
@@ -643,14 +715,192 @@ Never return explanatory text outside the JSON object.`;
     });
 
     // 3. Render the tool plan + execution
-    await runToolPlan(response.tool_plan, {
+    const planStatus = await runToolPlan(response.tool_plan, {
       response,
       userInput,
       turn,
       replyElement: replyDiv,
       toolResultContainer
     });
+    finalizeTurnSummary(turn, planStatus);
     finishTurn(turn);
+  }
+
+  function createTurnSummaryData(response) {
+    const intent = inferIntentFromResponse(response);
+    const timestamp = new Date();
+    return {
+      intent,
+      status: 'planned',
+      timestamp,
+      toolUsage: new Map(),
+      totalDurationMs: 0,
+      elements: null
+    };
+  }
+
+  function inferIntentFromResponse(response) {
+    const planEntries = Array.isArray(response?.tool_plan) ? response.tool_plan : [];
+    const normalizedTools = planEntries.map(entry => normalizeToolName(entry?.tool)).filter(Boolean);
+    const haystack = [
+      response?.restatement,
+      response?.visible_reply,
+      ...(planEntries.map(entry => entry?.reason || ''))
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    if (normalizedTools.includes('js.run_sandbox') || ARITHMETIC_INTENT_KEYWORDS.some(keyword => haystack.includes(keyword))) {
+      return { icon: '🔢', label: 'Arithmetic' };
+    }
+
+    if (
+      normalizedTools.includes('get_current_date') ||
+      TIME_INTENT_KEYWORDS.some(keyword => haystack.includes(keyword))
+    ) {
+      return { icon: '🕒', label: 'Clock' };
+    }
+
+    return { icon: '💬', label: 'General' };
+  }
+
+  function renderTurnSummaryBar(summaryData) {
+    const bar = document.createElement('button');
+    bar.type = 'button';
+    bar.className = 'turn-summary-bar';
+    bar.setAttribute('aria-label', 'Toggle assistant details');
+    bar.setAttribute('aria-controls', 'thinking-log-body tool-details-body');
+    bar.addEventListener('click', (event) => {
+      event.preventDefault();
+      toggleDetailPanelsFromSummary();
+    });
+
+    const intentSpan = document.createElement('span');
+    intentSpan.className = 'turn-summary-item turn-summary-intent';
+    intentSpan.textContent = `${summaryData.intent.icon} ${summaryData.intent.label}`;
+
+    const statusBadge = document.createElement('span');
+    statusBadge.className = 'turn-summary-item turn-summary-status is-planned';
+    statusBadge.textContent = 'Planned';
+
+    const toolSpan = document.createElement('span');
+    toolSpan.className = 'turn-summary-item turn-summary-tools';
+    toolSpan.textContent = 'No tools';
+
+    const durationSpan = document.createElement('span');
+    durationSpan.className = 'turn-summary-item turn-summary-duration';
+    durationSpan.textContent = '0ms';
+
+    const timestampSpan = document.createElement('span');
+    timestampSpan.className = 'turn-summary-item turn-summary-timestamp';
+    timestampSpan.textContent = summaryData.timestamp.toLocaleTimeString();
+
+    bar.append(
+      intentSpan,
+      createSummarySeparator(),
+      statusBadge,
+      createSummarySeparator(),
+      toolSpan,
+      createSummarySeparator(),
+      durationSpan,
+      createSummarySeparator(),
+      timestampSpan
+    );
+
+    return {
+      root: bar,
+      status: statusBadge,
+      tools: toolSpan,
+      duration: durationSpan,
+      timestamp: timestampSpan
+    };
+  }
+
+  function createSummarySeparator() {
+    const separator = document.createElement('span');
+    separator.className = 'turn-summary-separator';
+    separator.textContent = '·';
+    return separator;
+  }
+
+  function registerSummaryToggle(button) {
+    if (!button) return;
+    summaryToggleRegistry.add(button);
+    button.setAttribute('aria-expanded', areDetailPanelsExpanded() ? 'true' : 'false');
+  }
+
+  function finalizeTurnSummary(turn, planStatus) {
+    if (!turn?.summary) return;
+    const status = planStatus === 'failed' ? 'failed' : 'executed';
+    setTurnSummaryStatus(turn, status);
+    refreshTurnSummaryStats(turn);
+  }
+
+  function setTurnSummaryStatus(turn, status) {
+    if (!turn?.summary) return;
+    turn.summary.status = status;
+    const badge = turn.summary.elements?.status;
+    if (!badge) return;
+    badge.classList.remove('is-planned', 'is-executed', 'is-failed');
+    const className = status === 'failed' ? 'is-failed' : status === 'executed' ? 'is-executed' : 'is-planned';
+    badge.classList.add(className);
+    const label = status === 'failed' ? 'Failed' : status === 'executed' ? 'Executed' : 'Planned';
+    badge.textContent = label;
+  }
+
+  function recordToolRunForSummary(turn, toolName, durationMs) {
+    if (!turn?.summary || !toolName) return;
+    if (Number.isFinite(durationMs) && durationMs > 0) {
+      turn.summary.totalDurationMs += durationMs;
+    }
+    const currentCount = turn.summary.toolUsage.get(toolName) || 0;
+    turn.summary.toolUsage.set(toolName, currentCount + 1);
+    refreshTurnSummaryStats(turn);
+  }
+
+  function refreshTurnSummaryStats(turn) {
+    if (!turn?.summary?.elements) return;
+    turn.summary.elements.tools.textContent = formatSummaryTools(turn.summary.toolUsage);
+    turn.summary.elements.duration.textContent = formatDurationMs(turn.summary.totalDurationMs);
+  }
+
+  function formatSummaryTools(toolUsage) {
+    if (!(toolUsage instanceof Map) || toolUsage.size === 0) {
+      return 'No tools';
+    }
+    const entries = [];
+    toolUsage.forEach((count, tool) => {
+      entries.push(`${tool} ×${count}`);
+    });
+    return entries.join(', ');
+  }
+
+  function formatDurationMs(totalMs) {
+    if (!Number.isFinite(totalMs) || totalMs <= 0) {
+      return '0ms';
+    }
+    if (totalMs >= 1000) {
+      const seconds = (totalMs / 1000).toFixed(totalMs >= 10000 ? 0 : 1);
+      return `${seconds}s`;
+    }
+    return `${Math.round(totalMs)}ms`;
+  }
+
+  function getHighResTime() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+    return Date.now();
+  }
+
+  function measureDurationMs(startTime) {
+    const end = getHighResTime();
+    const raw = end - startTime;
+    if (!Number.isFinite(raw) || raw <= 0) {
+      return 0;
+    }
+    return Math.max(1, Math.round(raw));
   }
 
   /**
@@ -662,7 +912,7 @@ Never return explanatory text outside the JSON object.`;
     const planEntries = Array.isArray(rawPlanEntries) ? rawPlanEntries : [];
     if (!planEntries.length) {
       setToolPlanMessage('No next step determined.');
-      return;
+      return 'succeeded';
     }
 
     appendThinkingLogEntry(`[plan] 準備執行 ${planEntries.length} 步`);
@@ -683,6 +933,7 @@ Never return explanatory text outside the JSON object.`;
       setToolPlanMessage(`Plan finished with issues (${planEntries.length} steps)`);
       appendThinkingLogEntry('[plan] 計畫完成但包含失敗步驟');
     }
+    return encounteredFailure ? 'failed' : 'succeeded';
   }
 
   /**
@@ -794,14 +1045,19 @@ Never return explanatory text outside the JSON object.`;
     showToolPlanExecuting(toolName, reason, context.stepInfo);
     appendThinkingLogEntry(`[tool] ${toolName} start`);
     context.turn.toolRuns.push({ tool: toolName, status: 'started', args: toolInput });
+    const runIndex = context.turn.toolRuns.length - 1;
+    const runStart = getHighResTime();
+    let durationMs = 0;
 
     try {
       const result = await tool.run(toolInput);
+      durationMs = measureDurationMs(runStart);
       const readable = formatToolResult(toolName, result);
       context.turn.toolRuns[context.turn.toolRuns.length - 1] = {
         tool: toolName,
         status: 'succeeded',
-        result
+        result,
+        durationMs
       };
       appendThinkingLogEntry(`[tool] ${toolName} → ${readable}`);
       if (Array.isArray(result?.logs) && result.logs.length) {
@@ -814,6 +1070,7 @@ Never return explanatory text outside the JSON object.`;
       revealToolResult(context.toolResultContainer, readable, { stepInfo: context.stepInfo });
       showToolPlanExecuted(toolName, context.stepInfo);
       updateVisibleReplyWithToolResult(context.replyElement, result);
+      const measuredTime = typeof result?.timeMs === 'number' ? result.timeMs : durationMs;
       renderToolDetails({
         tool: toolName,
         status: 'succeeded',
@@ -821,12 +1078,13 @@ Never return explanatory text outside the JSON object.`;
         input: toolInput,
         result,
         logs: result?.logs,
-        timeMs: typeof result?.timeMs === 'number' ? result.timeMs : undefined,
+        timeMs: measuredTime,
         timeoutMs: toolInput?.timeoutMs,
         stringified: Boolean(result?.stringified)
       });
       return 'succeeded';
     } catch (error) {
+      durationMs = durationMs || measureDurationMs(runStart);
       console.error(`Tool ${toolName} failed:`, error);
       const errorCode = error?.code || 'runtime_error';
       const detailMessage = error?.message || 'unknown error';
@@ -834,7 +1092,8 @@ Never return explanatory text outside the JSON object.`;
         tool: toolName,
         status: 'failed',
         error: detailMessage,
-        code: errorCode
+        code: errorCode,
+        durationMs
       };
       appendThinkingLogEntry(`[error] ${toolName} ${errorCode}`);
       revealToolResult(context.toolResultContainer, 'unavailable', {
@@ -852,9 +1111,16 @@ Never return explanatory text outside the JSON object.`;
           code: errorCode,
           detail: detailMessage
         },
+        timeMs: durationMs,
         timeoutMs: toolInput?.timeoutMs
       });
       return 'failed';
+    } finally {
+      const recordedDuration = durationMs || measureDurationMs(runStart);
+      if (context.turn.toolRuns[runIndex]) {
+        context.turn.toolRuns[runIndex].durationMs = recordedDuration;
+      }
+      recordToolRunForSummary(context.turn, toolName, recordedDuration);
     }
   }
 

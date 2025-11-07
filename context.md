@@ -19,7 +19,8 @@ Convert the previously decorative `tool_plan` into an actual multi-step workflow
 - [x] Add `js.run_sandbox` worker sandbox (code≤500 chars, timeout guard, denied APIs) plus UI hydration/logging.
 - [ ] Smoke test multi-step plan scenarios (no-tool step, 2+ tool steps, failure) to ensure the new runner/UI wiring holds up.
 - [ ] Run sandbox acceptance matrix (math, args injection, console log capture, forbidden API, timeout, object result) once UI is wired.
-- [ ] Add Turn Summary Bar UI with intent/status/tools/duration/timestamp plus toggle wiring to Thinking Log + Tool Details.
+- [x] Add Turn Summary Bar UI with intent/status/tools/duration/timestamp plus toggle wiring to Thinking Log + Tool Details.
+- [x] Polish the Turn Summary Bar responsive layout so the summary pills stay readable on narrow widths (wrap behavior, separator handling).
 
 ## Notes
 
@@ -38,7 +39,7 @@ Convert the previously decorative `tool_plan` into an actual multi-step workflow
 - Fixed the system prompt literal so inline instructions use quotes instead of backticks ("return")—prevents `SyntaxError: unexpected token: keyword 'return'` at load time.
 - Thinking log UI gained a hide/show toggle, and a new Tool Details drawer surfaces the exact sandbox code, args, logs, and results (with guard notes) so users can audit executions without digging into DevTools.
 - JSON repair now chains extra heuristics (remove trailing commas, auto-insert missing commas between adjacent string literals) so LLM typos like missing `,` inside `thinking_log` arrays no longer crash the turn.
-- Turn Summary Bar should derive intent from the LLM payload (restatement/plan/tool ids), summarize tool usage counts, sum tool duration (fallback to measured runtime), show local timestamp, display status badges (executed/failed/planned), and expose a11y toggle hooking into Thinking Log + Tool Details visibility.
+- Turn Summary Bar derives intent from the LLM payload (restatement/plan/tool ids), summarizes tool usage counts, sums tool duration (fallback to measured runtime), shows the local timestamp, displays status badges (executed/failed/planned), and exposes an accessible toggle that syncs Thinking Log + Tool Details visibility.
 
 ## Progress
 
@@ -50,4 +51,5 @@ Convert the previously decorative `tool_plan` into an actual multi-step workflow
 - Integrated `js.run_sandbox` end-to-end (prompt contract, argument validation, worker sandbox, timeout, log capture, UI timeline, README updates) so compute snippets can run safely inside the browser.
 - Added collapsible controls for the thinking log and a tool details panel that renders sandbox code payloads, execution metadata, and guard notes for each run. The drawer now appends entries instead of replacing them, so multiple tool executions stay visible.
 - The plan executor (`runToolPlan` + `runSinglePlanStep`) now iterates through every LLM step, logs `Step i/n - …`, pushes individual result rows, and downgrades the plan card to “Plan finished with issues” if any tool fails.
-- Pending: integrate the Turn Summary Bar (intent/status/tools/duration/timestamp) plus toggle behavior so each assistant turn exposes a concise overview.
+- Added the Turn Summary Bar with aggregated intent/status/tool/duration/timestamp plus synchronized collapsible control for Thinking Log + Tool Details.
+- Added responsive CSS so the summary pills wrap gracefully: flex-wrap on the bar, normal white-space, and a mobile breakpoint (<520px) that stacks items vertically and hides separators.
