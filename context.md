@@ -1,16 +1,22 @@
-# Task: Integrate Gemini Provider (Connectivity Test)
+# CSV Agent Task Context
 
 ## Goal
-Integrate Gemini into the UI, allowing a user to save an API key and perform a basic connectivity test.
+Implement a tool execution flow for a `get_current_date` tool in a vanilla JavaScript project. The agent should be able to understand a user's request for the time, execute a tool, and display the result in the UI.
 
 ## TODO
-- [ ] **Plan:** Create context.md and establish a todo list.
-- [ ] **HTML:** Add a "Provider Settings" panel to `index.html`.
-- [ ] **CSS:** Style the new settings panel in `style.css`.
-- [ ] **JavaScript:** Implement logic in `script.js` to save the API key to localStorage and test the connection.
-- [ ] **Verify:** Confirm the UI and connectivity test work correctly.
+- [ ] Setup basic HTML, CSS, and JS files.
+- [ ] Implement the core logic to simulate LLM responses and manage the chat flow.
+- [ ] Implement the `get_current_date` tool.
+- [ ] Implement the tool executor to call the tool based on the `tool_plan`.
+- [ ] Implement result handling to update the UI.
+- [ ] Handle tool name aliases and implicit mapping.
+- [ ] Implement error handling.
+- [ ] Update documentation (`README.md`).
 
 ## Notes
-- The connection test should simply confirm that the API key is valid by getting a fixed "READY" response.
-- No complex tool-calling or data cleaning is required at this stage.
-- The API key should be stored in `localStorage`.
+- The project is a pure vanilla frontend application (HTML, CSS, JS).
+- No backend or Node.js is required.
+- The focus is on the tool execution mechanism, not on a real LLM integration. We will simulate the LLM's JSON output.
+
+## Progress
+- Initial setup and planning complete. Starting with file creation.
