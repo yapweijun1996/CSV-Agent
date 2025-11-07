@@ -5,9 +5,52 @@ document.addEventListener('DOMContentLoaded', () => {
   const messageList = document.getElementById('message-list');
   const thinkingLogList = document.getElementById('thinking-log-list');
   const toolPlanContent = document.getElementById('tool-plan-content');
+  const toolPlanText = document.getElementById('tool-plan-text') || toolPlanContent;
+  const toolPlanSpinner = document.getElementById('tool-plan-spinner');
+  if (toolPlanSpinner) {
+    toolPlanSpinner.setAttribute('aria-hidden', 'true');
+  }
   const resizer = document.getElementById('resizer');
   const assistantSidebar = document.getElementById('assistant-sidebar');
   const rootStyle = document.documentElement;
+
+  // --- Tool Registry & State ---
+  const TOOL_ALIASES = {
+    'get_current_date': 'get_current_date',
+    'clock.now': 'get_current_date',
+    'time.now': 'get_current_date',
+    'get_time': 'get_current_date'
+  };
+
+  const TIME_INTENT_KEYWORDS = [
+    'time',
+    'date',
+    'today',
+    'now',
+    '現在',
+    '時間',
+    '日期',
+    '今天',
+    'what time',
+    'clock'
+  ];
+
+  const TOOL_REGISTRY = {
+    get_current_date: {
+      label: 'get_current_date',
+      async run() {
+        const now = new Date();
+        return {
+          iso: now.toISOString(),
+          local: now.toLocaleString(),
+          epochMs: now.getTime()
+        };
+      }
+    }
+  };
+
+  let activeTurn = null;
+  const turnHistory = [];
   
   // --- Settings Modal Elements ---
   const settingsBtn = document.getElementById('settings-btn');
@@ -205,7 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Call the real LLM and render the response
     try {
       const llmResponse = await callGeminiApi(userInput);
-      renderLlmResponse(llmResponse);
+      await renderLlmResponse(llmResponse, userInput);
     } catch (error) {
       console.error("Error from LLM:", error);
       renderError(error.message || "Sorry, something went wrong.");
@@ -341,10 +384,13 @@ The JSON structure must strictly follow this format:
   }
 
   /**
-   * Renders the complete response from the LLM.
+   * Renders the complete response from the LLM and optionally executes tools.
    * @param {object} response - The JSON response from the LLM.
+   * @param {string} userInput - The original user prompt.
    */
-  function renderLlmResponse(response) {
+  async function renderLlmResponse(response, userInput) {
+    const turn = startNewTurn();
+
     // 1. Render the main chat message (restatement + visible reply)
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message assistant';
@@ -357,30 +403,54 @@ The JSON structure must strictly follow this format:
     replyDiv.className = 'visible-reply';
     replyDiv.textContent = response.visible_reply;
 
+    const toolResultDiv = document.createElement('div');
+    toolResultDiv.className = 'tool-result';
+    toolResultDiv.dataset.visible = 'false';
+
     messageDiv.appendChild(restatementDiv);
     messageDiv.appendChild(replyDiv);
+    messageDiv.appendChild(toolResultDiv);
     messageList.appendChild(messageDiv);
     scrollToBottom();
 
     // 2. Render the thinking log
-    thinkingLogList.innerHTML = ''; // Clear previous logs
-    response.thinking_log.forEach(log => {
+    thinkingLogList.innerHTML = '';
+    (response.thinking_log || []).forEach(log => {
       const li = document.createElement('li');
       li.textContent = log;
       thinkingLogList.appendChild(li);
     });
 
-    // 3. Render the tool plan
-    const firstPlan = response.tool_plan && response.tool_plan[0];
-    if (firstPlan) {
-      if (firstPlan.need_tool && firstPlan.tool) {
-        toolPlanContent.textContent = `Tool: ${firstPlan.tool} - Reason: ${firstPlan.reason}`;
-      } else {
-        toolPlanContent.textContent = `No tool needed. Reason: ${firstPlan.reason || 'No specific reason provided.'}`;
-      }
-    } else {
-      toolPlanContent.textContent = 'No next step determined.';
+    // 3. Render the tool plan + execution
+    const planEntry = Array.isArray(response.tool_plan) ? response.tool_plan[0] : null;
+    if (!planEntry) {
+      setToolPlanMessage('No next step determined.');
+      finishTurn(turn);
+      return;
     }
+
+    if (!planEntry.need_tool) {
+      setToolPlanMessage(`No tool needed. Reason: ${planEntry.reason || 'No specific reason provided.'}`);
+      finishTurn(turn);
+      return;
+    }
+
+    const resolvedTool = resolveToolFromPlan(planEntry, response, userInput);
+    if (!resolvedTool) {
+      handleUnsupportedTool(planEntry);
+      finishTurn(turn);
+      return;
+    }
+
+    if (resolvedTool.inferred) {
+      appendThinkingLogEntry('[plan] 推斷時間意圖，改用 get_current_date');
+    }
+
+    await executeToolWithUi(resolvedTool.name, planEntry.reason, {
+      turn,
+      toolResultDiv
+    });
+    finishTurn(turn);
   }
 
   /**
@@ -400,7 +470,7 @@ The JSON structure must strictly follow this format:
    */
   function clearThinkingPanel() {
     thinkingLogList.innerHTML = '';
-    toolPlanContent.textContent = '';
+    setToolPlanMessage('Awaiting plan...');
   }
 
   /**
@@ -418,5 +488,145 @@ The JSON structure must strictly follow this format:
    */
   function scrollToBottom() {
     messageList.scrollTop = messageList.scrollHeight;
+  }
+
+  async function executeToolWithUi(toolName, reason, context) {
+    const tool = TOOL_REGISTRY[toolName];
+    if (!tool) {
+      handleUnsupportedTool({ tool: toolName, reason });
+      return;
+    }
+
+    showToolPlanExecuting(toolName, reason);
+    context.turn.toolRuns.push({ tool: toolName, status: 'started' });
+
+    try {
+      const result = await tool.run();
+      const readable = formatToolResult(result);
+      context.turn.toolRuns[context.turn.toolRuns.length - 1] = {
+        tool: toolName,
+        status: 'succeeded',
+        result
+      };
+      appendThinkingLogEntry(`[tool] ${toolName} → ${readable}`);
+      appendThinkingLogEntry('[decide] fulfilled');
+      revealToolResult(context.toolResultDiv, readable, false);
+      showToolPlanExecuted(toolName);
+    } catch (error) {
+      console.error(`Tool ${toolName} failed:`, error);
+      context.turn.toolRuns[context.turn.toolRuns.length - 1] = {
+        tool: toolName,
+        status: 'failed',
+        error: error.message || 'unknown error'
+      };
+      appendThinkingLogEntry(`[error] ${toolName} failed`);
+      revealToolResult(context.toolResultDiv, 'unavailable', true);
+      showToolPlanFailure(toolName);
+    }
+  }
+
+  function resolveToolFromPlan(planEntry, response, userInput) {
+    const normalized = normalizeToolName(planEntry.tool);
+    if (normalized) {
+      return { name: normalized, inferred: false };
+    }
+    if (!planEntry.need_tool) {
+      return null;
+    }
+
+    const text = aggregateIntentText(planEntry, response, userInput);
+    const matchesIntent = TIME_INTENT_KEYWORDS.some(keyword => text.includes(keyword));
+    if (matchesIntent) {
+      return { name: 'get_current_date', inferred: true };
+    }
+    return null;
+  }
+
+  function normalizeToolName(rawName) {
+    if (!rawName || typeof rawName !== 'string') {
+      return null;
+    }
+    const key = rawName.trim().toLowerCase();
+    return TOOL_ALIASES[key] || null;
+  }
+
+  function aggregateIntentText(planEntry, response, userInput) {
+    return [
+      planEntry.reason,
+      response?.restatement,
+      response?.visible_reply,
+      userInput
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+  }
+
+  function handleUnsupportedTool(planEntry) {
+    const label = planEntry.tool || 'unspecified';
+    appendThinkingLogEntry(`[warn] unsupported tool: ${label}`);
+    const suffix = planEntry.reason ? ` - ${planEntry.reason}` : '';
+    setToolPlanMessage(`Unsupported tool: ${label}${suffix}`);
+  }
+
+  function showToolPlanExecuting(toolName, reason) {
+    const suffix = reason ? ` - ${reason}` : '';
+    setToolPlanMessage(`Tool: ${toolName}${suffix}`, { spinner: true });
+  }
+
+  function showToolPlanExecuted(toolName) {
+    setToolPlanMessage(`Executed: ${toolName}`);
+  }
+
+  function showToolPlanFailure(toolName) {
+    setToolPlanMessage(`Failed: ${toolName}`);
+  }
+
+  function setToolPlanMessage(text, options = {}) {
+    if (toolPlanText) {
+      toolPlanText.textContent = text;
+    } else if (toolPlanContent) {
+      toolPlanContent.textContent = text;
+    }
+    if (toolPlanSpinner) {
+      const showSpinner = Boolean(options.spinner);
+      toolPlanSpinner.classList.toggle('is-visible', showSpinner);
+      toolPlanSpinner.setAttribute('aria-hidden', showSpinner ? 'false' : 'true');
+    }
+  }
+
+  function revealToolResult(element, value, isError = false) {
+    if (!element) return;
+    element.textContent = `Result: ${value}`;
+    element.dataset.visible = 'true';
+    if (isError) {
+      element.classList.add('is-error');
+    } else {
+      element.classList.remove('is-error');
+    }
+  }
+
+  function formatToolResult(result) {
+    if (!result) return 'unavailable';
+    return result.local || result.iso || String(result.epochMs);
+  }
+
+  function startNewTurn() {
+    const turn = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      toolRuns: []
+    };
+    activeTurn = turn;
+    turnHistory.push(turn);
+    if (turnHistory.length > 10) {
+      turnHistory.shift();
+    }
+    return turn;
+  }
+
+  function finishTurn(turn) {
+    if (activeTurn && activeTurn.id === turn.id) {
+      activeTurn = null;
+    }
   }
 });

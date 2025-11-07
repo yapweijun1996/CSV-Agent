@@ -302,6 +302,33 @@ input:checked + .slider:before {
   padding: 8px 12px;
   border-radius: 8px;
   color: #4338ca;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.inline-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(67, 56, 202, 0.3);
+  border-top-color: #4338ca;
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+  display: none;
+}
+
+.inline-spinner.is-visible {
+  display: inline-block;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .message .restatement {
@@ -311,4 +338,19 @@ input:checked + .slider:before {
   padding-bottom: 8px;
   margin-bottom: 8px;
   font-style: italic;
+}
+
+.message .tool-result {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #047857;
+}
+
+.message .tool-result[data-visible="false"] {
+  display: none;
+}
+
+.message .tool-result.is-error {
+  color: #b91c1c;
 }
