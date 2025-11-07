@@ -50,9 +50,16 @@
 
   <div class="resizer" id="resizer"></div>
 
-  <aside class="assistant-sidebar">
-    <h2>Assistant Panel</h2>
-    <p>This is the assistant panel.</p>
+  <aside class="assistant-sidebar" id="assistant-sidebar">
+    <div class="message-list" id="message-list">
+      <div class="message assistant">
+        Hello! How can I help you with your data today?
+      </div>
+    </div>
+    <div class="chat-input-area">
+      <textarea id="chat-input" placeholder="Ask a question about your data..."></textarea>
+      <button id="send-btn">Send</button>
+    </div>
   </aside>
 </div>
 
