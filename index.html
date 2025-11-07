@@ -37,8 +37,15 @@
     </div>
     <div class="assistant-thinking-panel">
       <div class="timeline" id="timeline">
-        <h4>Thinking Log</h4>
-        <ul id="thinking-log-list"></ul>
+        <div class="section-header">
+          <h4>Thinking Log</h4>
+          <button id="thinking-log-toggle" class="toggle-btn" aria-expanded="true" aria-controls="thinking-log-body">
+            Hide
+          </button>
+        </div>
+        <div class="collapsible" id="thinking-log-body">
+          <ul id="thinking-log-list"></ul>
+        </div>
       </div>
       <div class="tool-plan" id="tool-plan">
         <h4>Next Step</h4>
@@ -46,6 +53,17 @@
           <span id="tool-plan-text">No next step determined.</span>
           <span id="tool-plan-spinner" class="inline-spinner" aria-hidden="true"></span>
         </p>
+      </div>
+      <div class="tool-details" id="tool-details">
+        <div class="section-header">
+          <h4>Tool Details</h4>
+          <button id="tool-details-toggle" class="toggle-btn" aria-expanded="false" aria-controls="tool-details-body">
+            Show
+          </button>
+        </div>
+        <div class="collapsible is-collapsed tool-details-body" id="tool-details-body" aria-hidden="true">
+          <p class="tool-details-empty">No tool executions yet.</p>
+        </div>
       </div>
     </div>
     <div class="chat-input-area">

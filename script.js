@@ -4,9 +4,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const sendBtn = document.getElementById('send-btn');
   const messageList = document.getElementById('message-list');
   const thinkingLogList = document.getElementById('thinking-log-list');
+  const thinkingLogToggle = document.getElementById('thinking-log-toggle');
+  const thinkingLogBody = document.getElementById('thinking-log-body');
   const toolPlanContent = document.getElementById('tool-plan-content');
   const toolPlanText = document.getElementById('tool-plan-text') || toolPlanContent;
   const toolPlanSpinner = document.getElementById('tool-plan-spinner');
+  const toolDetailsToggle = document.getElementById('tool-details-toggle');
+  const toolDetailsBody = document.getElementById('tool-details-body');
   if (toolPlanSpinner) {
     toolPlanSpinner.setAttribute('aria-hidden', 'true');
   }
@@ -19,7 +23,8 @@ document.addEventListener('DOMContentLoaded', () => {
     'get_current_date': 'get_current_date',
     'clock.now': 'get_current_date',
     'time.now': 'get_current_date',
-    'get_time': 'get_current_date'
+    'get_time': 'get_current_date',
+    'js.run_sandbox': 'js.run_sandbox'
   };
 
   const TIME_INTENT_KEYWORDS = [
@@ -45,6 +50,16 @@ document.addEventListener('DOMContentLoaded', () => {
           local: now.toLocaleString(),
           epochMs: now.getTime()
         };
+      }
+    },
+    'js.run_sandbox': {
+      label: 'js.run_sandbox',
+      /**
+       * Runs untrusted math/array snippets inside an isolated worker.
+       * @param {object} payload - Sanitized args from the LLM plan.
+       */
+      async run(payload) {
+        return runSandboxSnippet(payload || {});
       }
     }
   };
@@ -115,6 +130,9 @@ document.addEventListener('DOMContentLoaded', () => {
       settingsModal.style.display = 'none';
     }
   });
+
+  initializeCollapsible(thinkingLogBody, thinkingLogToggle, true);
+  initializeCollapsible(toolDetailsBody, toolDetailsToggle, false);
 
   saveSettingsBtn.addEventListener('click', () => {
     const apiKey = apiKeyInput.value.trim();
@@ -228,6 +246,37 @@ document.addEventListener('DOMContentLoaded', () => {
     thinkingLogList.scrollTop = thinkingLogList.scrollHeight;
   }
 
+  function initializeCollapsible(container, toggleBtn, expandedByDefault) {
+    if (!container || !toggleBtn) return;
+    toggleBtn.addEventListener('click', () => handleCollapsibleToggle(container, toggleBtn));
+    setCollapsibleState(container, toggleBtn, expandedByDefault);
+  }
+
+  function handleCollapsibleToggle(container, toggleBtn) {
+    if (!container || !toggleBtn) return;
+    const isExpanded = toggleBtn.getAttribute('aria-expanded') === 'true';
+    setCollapsibleState(container, toggleBtn, !isExpanded);
+  }
+
+  function setCollapsibleState(container, toggleBtn, expanded) {
+    if (!container || !toggleBtn) return;
+    container.classList.toggle('is-collapsed', !expanded);
+    container.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+    toggleBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    toggleBtn.textContent = expanded ? 'Hide' : 'Show';
+  }
+
+  function clearToolDetails() {
+    if (!toolDetailsBody) return;
+    toolDetailsBody.innerHTML = '<p class="tool-details-empty">No tool executions yet.</p>';
+    if (toolDetailsToggle) {
+      setCollapsibleState(toolDetailsBody, toolDetailsToggle, false);
+    } else {
+      toolDetailsBody.classList.add('is-collapsed');
+      toolDetailsBody.setAttribute('aria-hidden', 'true');
+    }
+  }
+
   // --- Core Functions ---
 
   /**
@@ -291,9 +340,11 @@ Guidelines:
 
 About tools:
 - Any tool you list WILL be executed by the host system. Do not claim you lack real-time capabilities; rely on the tool output instead.
-- Supported tool ids: "get_current_date", "clock.now", "time.now", "get_time" (these are aliases of the same clock tool). Pick one of them whenever the user asks for the current date/time.
+- Supported tool ids: "get_current_date", "clock.now", "time.now", "get_time" (these are aliases of the same clock tool) and "js.run_sandbox" for pure math/array/date snippets that must run inside a compute-only worker.
+- When you use "js.run_sandbox", include an "args" object with: { "code": "string <=500 chars", "args": { ...optional data... }, "timeoutMs": number <=1500 }. The snippet can use Math/Date/JSON/etc, must be synchronous, and should "return" the value you want to show via {{tool_result.result}}.
+- Snippets cannot touch DOM, storage, network, or browser APIs such as fetch/XMLHttpRequest/WebSocket/importScripts/indexedDB/caches/navigator.*; attempting to do so will raise a forbidden_api error.
 - When no tool is needed, set "need_tool": false and clearly explain why in "reason".
-- When a tool is needed, set "need_tool": true, specify the tool id, and describe what data you expect to place into the visible reply via {{tool_result.local}} / {{tool_result.iso}} / {{tool_result.epochMs}} placeholders.
+- When a tool is needed, set "need_tool": true, specify the tool id, and describe what data you expect to place into the visible reply via {{tool_result.local}} / {{tool_result.iso}} / {{tool_result.epochMs}} / {{tool_result.result}} placeholders as appropriate.
 
 Contract enforcement:
 - The host strictly validates this schema. Missing fields, wrong types, or empty tool plans will terminate the turn.
@@ -305,23 +356,40 @@ Never return explanatory text outside the JSON object.`;
   }
 
   /**
-   * Attempts to repair a malformed JSON string by extracting the content between the first '{' and last '}'.
+   * Attempts to repair a malformed JSON string by extracting the content between the first '{' and last '}'
+   * and then applying light heuristics (dangling comma removal, inferred commas inside arrays).
    * @param {string} malformedJson - The potentially malformed JSON string.
    * @returns {object|null} The parsed JSON object or null if repair fails.
    */
   function repairJson(malformedJson) {
-    try {
-      const startIndex = malformedJson.indexOf('{');
-      const endIndex = malformedJson.lastIndexOf('}');
-      if (startIndex > -1 && endIndex > -1 && endIndex > startIndex) {
-        const jsonSubstring = malformedJson.substring(startIndex, endIndex + 1);
-        return JSON.parse(jsonSubstring);
-      }
-      return null;
-    } catch (e) {
-      console.error("JSON repair failed:", e);
+    if (typeof malformedJson !== 'string') {
       return null;
     }
+
+    const startIndex = malformedJson.indexOf('{');
+    const endIndex = malformedJson.lastIndexOf('}');
+    if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+      return null;
+    }
+
+    const candidate = malformedJson.substring(startIndex, endIndex + 1);
+    const attempts = [candidate, ...generateJsonRepairCandidates(candidate)];
+    let lastError = null;
+
+    for (const attempt of attempts) {
+      if (!attempt) continue;
+      try {
+        return JSON.parse(attempt);
+      } catch (parseError) {
+        lastError = parseError;
+        continue;
+      }
+    }
+
+    if (lastError) {
+      console.error('JSON repair failed:', lastError);
+    }
+    return null;
   }
 
   /**
@@ -394,6 +462,19 @@ Never return explanatory text outside the JSON object.`;
         };
         if (toolId) {
           sanitizedEntry.tool = toolId;
+        }
+        if (entry.hasOwnProperty('args')) {
+          if (entry.args && typeof entry.args === 'object' && !Array.isArray(entry.args)) {
+            try {
+              sanitizedEntry.args = JSON.parse(JSON.stringify(entry.args));
+            } catch (cloneError) {
+              errors.push(`tool_plan[${index}].args 無法序列化`);
+            }
+          } else if (entry.args === null) {
+            sanitizedEntry.args = null;
+          } else {
+            errors.push(`tool_plan[${index}].args 必須為物件或省略`);
+          }
         }
         sanitizedPlan.push(sanitizedEntry);
       });
@@ -587,7 +668,8 @@ Never return explanatory text outside the JSON object.`;
     await executeToolWithUi(resolvedTool.name, planEntry.reason, {
       turn,
       toolResultDiv,
-      replyElement: replyDiv
+      replyElement: replyDiv,
+      planEntry
     });
     finishTurn(turn);
   }
@@ -608,8 +690,11 @@ Never return explanatory text outside the JSON object.`;
    * Clears the thinking log and tool plan displays.
    */
   function clearThinkingPanel() {
-    thinkingLogList.innerHTML = '';
+    if (thinkingLogList) {
+      thinkingLogList.innerHTML = '';
+    }
     setToolPlanMessage('Awaiting plan...');
+    clearToolDetails();
   }
 
   /**
@@ -636,33 +721,334 @@ Never return explanatory text outside the JSON object.`;
       return;
     }
 
+    let toolInput;
+    try {
+      toolInput = prepareToolInput(toolName, context.planEntry);
+    } catch (inputError) {
+      console.error(`Tool ${toolName} input error:`, inputError);
+      appendThinkingLogEntry(`[error] ${toolName} args invalid`);
+      revealToolResult(context.toolResultDiv, 'unavailable', true);
+      showToolPlanFailure(toolName);
+      setToolPlanMessage(`Failed: ${toolName} - ${inputError.message}`);
+      return;
+    }
+
     showToolPlanExecuting(toolName, reason);
-    context.turn.toolRuns.push({ tool: toolName, status: 'started' });
+    appendThinkingLogEntry(`[tool] ${toolName} start`);
+    context.turn.toolRuns.push({ tool: toolName, status: 'started', args: toolInput });
 
     try {
-      const result = await tool.run();
-      const readable = formatToolResult(result);
+      const result = await tool.run(toolInput);
+      const readable = formatToolResult(toolName, result);
       context.turn.toolRuns[context.turn.toolRuns.length - 1] = {
         tool: toolName,
         status: 'succeeded',
         result
       };
       appendThinkingLogEntry(`[tool] ${toolName} → ${readable}`);
+      if (Array.isArray(result?.logs) && result.logs.length) {
+        appendThinkingLogEntry(`[log] ${JSON.stringify(result.logs).slice(0, 200)}`);
+      }
+      if (result?.stringified) {
+        appendThinkingLogEntry('[guard] stringified result');
+      }
       appendThinkingLogEntry('[decide] fulfilled');
       revealToolResult(context.toolResultDiv, readable, false);
       showToolPlanExecuted(toolName);
       updateVisibleReplyWithToolResult(context.replyElement, result);
+      renderToolDetails({
+        tool: toolName,
+        status: 'succeeded',
+        reason,
+        input: toolInput,
+        result,
+        logs: result?.logs,
+        timeMs: typeof result?.timeMs === 'number' ? result.timeMs : undefined,
+        timeoutMs: toolInput?.timeoutMs,
+        stringified: Boolean(result?.stringified)
+      });
     } catch (error) {
       console.error(`Tool ${toolName} failed:`, error);
+      const errorCode = error?.code || 'runtime_error';
+      const detailMessage = error?.message || 'unknown error';
       context.turn.toolRuns[context.turn.toolRuns.length - 1] = {
         tool: toolName,
         status: 'failed',
-        error: error.message || 'unknown error'
+        error: detailMessage,
+        code: errorCode
       };
-      appendThinkingLogEntry(`[error] ${toolName} failed`);
+      appendThinkingLogEntry(`[error] ${toolName} ${errorCode}`);
       revealToolResult(context.toolResultDiv, 'unavailable', true);
-      showToolPlanFailure(toolName);
+      showToolPlanFailure(`${toolName} (${errorCode})`);
       updateVisibleReplyWithToolResult(context.replyElement, null, { fallbackValue: 'unavailable' });
+      renderToolDetails({
+        tool: toolName,
+        status: 'failed',
+        reason,
+        input: toolInput,
+        error: {
+          code: errorCode,
+          detail: detailMessage
+        },
+        timeoutMs: toolInput?.timeoutMs
+      });
+    }
+  }
+
+  function prepareToolInput(toolName, planEntry = {}) {
+    if (toolName === 'js.run_sandbox') {
+      return sanitizeSandboxArgs(planEntry.args);
+    }
+    return {};
+  }
+
+  function sanitizeSandboxArgs(rawArgs) {
+    const source = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
+    const code = typeof source.code === 'string' ? source.code.trim() : '';
+    if (!code) {
+      throw new Error('js.run_sandbox 需要 code 字串');
+    }
+    if (code.length > 500) {
+      throw new Error('code 必須 <= 500 字元');
+    }
+
+    let argsPayload = {};
+    if (source.args && typeof source.args === 'object' && !Array.isArray(source.args)) {
+      try {
+        argsPayload = JSON.parse(JSON.stringify(source.args));
+      } catch (cloneError) {
+        throw new Error('args 需為可序列化物件');
+      }
+    } else if (source.args === undefined || source.args === null) {
+      argsPayload = {};
+    } else {
+      throw new Error('args 必須為物件');
+    }
+
+    let timeoutMs = 500;
+    if (typeof source.timeoutMs === 'number' && Number.isFinite(source.timeoutMs)) {
+      timeoutMs = clamp(source.timeoutMs, 50, 1500);
+    }
+
+    return {
+      code,
+      args: argsPayload,
+      timeoutMs
+    };
+  }
+
+  async function runSandboxSnippet(config) {
+    if (typeof Worker === 'undefined') {
+      const unavailable = new Error('sandbox worker unavailable');
+      unavailable.code = 'sandbox_unavailable';
+      throw unavailable;
+    }
+
+    const { worker, revokeUrl } = createSandboxWorker();
+
+    return new Promise((resolve, reject) => {
+      const logs = [];
+      const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      let settled = false;
+
+      const cleanup = () => {
+        try {
+          worker.terminate();
+        } catch (terminateError) {
+          console.warn('sandbox termination failed:', terminateError);
+        }
+        revokeUrl();
+      };
+
+      const finishSuccess = (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const timeMs = ((typeof performance !== 'undefined' && performance.now)
+          ? performance.now()
+          : Date.now()) - start;
+        const sanitized = sanitizeSandboxResult(value);
+        resolve({
+          result: sanitized.value,
+          logs,
+          timeMs: Number(timeMs.toFixed(2)),
+          stringified: sanitized.stringified
+        });
+      };
+
+      const finishError = (code, detail) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const error = new Error(detail || code);
+        error.code = code || 'runtime_error';
+        reject(error);
+      };
+
+      const timeoutId = setTimeout(() => {
+        clearTimeout(timeoutId);
+        finishError('timeout', `Exceeded ${config.timeoutMs}ms`);
+      }, config.timeoutMs);
+
+      worker.onmessage = (event) => {
+        const data = event.data || {};
+        if (data.type === 'log') {
+          logs.push(String(data.value ?? ''));
+          return;
+        }
+        if (data.type === 'result') {
+          clearTimeout(timeoutId);
+          finishSuccess(data.value);
+          return;
+        }
+        if (data.type === 'error') {
+          clearTimeout(timeoutId);
+          finishError(data.error || 'runtime_error', data.detail);
+        }
+      };
+
+      worker.onerror = (event) => {
+        clearTimeout(timeoutId);
+        finishError('runtime_error', event.message || 'Worker error');
+      };
+
+      worker.postMessage({
+        code: config.code,
+        args: config.args
+      });
+    });
+  }
+
+  function createSandboxWorker() {
+    const forbiddenApis = [
+      'fetch',
+      'XMLHttpRequest',
+      'WebSocket',
+      'importScripts',
+      'indexedDB',
+      'caches'
+    ];
+    const typedArrays = [
+      'Int8Array', 'Uint8Array', 'Uint8ClampedArray',
+      'Int16Array', 'Uint16Array',
+      'Int32Array', 'Uint32Array',
+      'Float32Array', 'Float64Array',
+      'BigInt64Array', 'BigUint64Array'
+    ];
+    const frozenGlobals = [
+      'Math',
+      'Date',
+      'Number',
+      'String',
+      'Array',
+      'JSON',
+      'BigInt',
+      ...typedArrays
+    ];
+
+    const workerSource = `
+      const FORBIDDEN = ${JSON.stringify(forbiddenApis)};
+      function block(name) {
+        const trap = function() {
+          const error = new Error(name + ' is forbidden');
+          error.code = 'forbidden_api';
+          throw error;
+        };
+        try {
+          self[name] = trap;
+        } catch (e) {
+          try {
+            delete self[name];
+          } catch (noop) {}
+          self[name] = trap;
+        }
+      }
+      FORBIDDEN.forEach(block);
+      try { self.navigator = undefined; } catch (_) {}
+
+      const FROZEN = ${JSON.stringify(frozenGlobals)};
+      FROZEN.forEach((name) => {
+        if (self[name]) {
+          try {
+            Object.freeze(self[name]);
+          } catch (e) {}
+        }
+      });
+
+      function formatLog(value) {
+        if (typeof value === 'string') return value;
+        try { return JSON.stringify(value); } catch (e) { return String(value); }
+      }
+
+      const forwardLog = (...args) => {
+        const rendered = args.map(formatLog).join(' ');
+        self.postMessage({ type: 'log', value: rendered });
+        return rendered;
+      };
+
+      self.console = {
+        log: forwardLog,
+        info: forwardLog,
+        warn: forwardLog,
+        error: forwardLog
+      };
+
+      self.onmessage = function(event) {
+        const payload = event.data || {};
+        const code = typeof payload.code === 'string' ? payload.code : '';
+        const userArgs = payload.args;
+        try {
+          const fn = new Function('args', '"use strict";\\n' + code);
+          const result = fn(userArgs);
+          self.postMessage({ type: 'result', value: result });
+        } catch (error) {
+          const errorCode = error && error.code === 'forbidden_api' ? 'forbidden_api' : 'runtime_error';
+          self.postMessage({
+            type: 'error',
+            error: errorCode,
+            detail: error && error.message ? error.message : String(error)
+          });
+        }
+      };
+    `;
+
+    const blob = new Blob([workerSource], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    let worker;
+    try {
+      worker = new Worker(url, { name: 'js-run-sandbox' });
+    } catch (error) {
+      URL.revokeObjectURL(url);
+      throw error;
+    }
+    return {
+      worker,
+      revokeUrl: () => URL.revokeObjectURL(url)
+    };
+  }
+
+  function sanitizeSandboxResult(value) {
+    if (value === undefined) {
+      return { value: 'undefined', stringified: true };
+    }
+    if (value === null) {
+      return { value: null, stringified: false };
+    }
+    const valueType = typeof value;
+    if (valueType === 'object') {
+      return { value: safeStringify(value), stringified: true };
+    }
+    if (valueType === 'function' || valueType === 'symbol') {
+      return { value: String(value), stringified: true };
+    }
+    return { value, stringified: false };
+  }
+
+  function safeStringify(value) {
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return String(value);
     }
   }
 
@@ -777,9 +1163,147 @@ Never return explanatory text outside the JSON object.`;
     });
   }
 
-  function formatToolResult(result) {
+  function formatToolResult(toolName, result) {
     if (!result) return 'unavailable';
-    return result.local || result.iso || String(result.epochMs);
+    if (toolName === 'js.run_sandbox') {
+      return formatSandboxResult(result);
+    }
+    return formatClockResult(result);
+  }
+
+  function formatClockResult(result) {
+    if (!result) return 'unavailable';
+    if (result.local) return result.local;
+    if (result.iso) return result.iso;
+    if (typeof result.epochMs === 'number') return String(result.epochMs);
+    return 'unavailable';
+  }
+
+  function formatSandboxResult(result) {
+    const value = formatResultValue(result?.result);
+    const timeSuffix = typeof result?.timeMs === 'number' ? ` (${result.timeMs}ms)` : '';
+    const logsSuffix = Array.isArray(result?.logs) && result.logs.length
+      ? ` logs=${formatResultValue(result.logs)}`
+      : '';
+    return `${value}${timeSuffix}${logsSuffix}`.trim();
+  }
+
+  function formatResultValue(value) {
+    if (value === null || value === undefined) {
+      return 'null';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+      return String(value);
+    }
+    return safeStringify(value);
+  }
+
+  function renderToolDetails(details) {
+    if (!toolDetailsBody || !details) return;
+    toolDetailsBody.innerHTML = '';
+
+    const item = document.createElement('div');
+    item.className = 'tool-details-item';
+
+    const meta = document.createElement('div');
+    meta.className = 'tool-details-meta';
+    const title = document.createElement('strong');
+    title.textContent = details.tool || 'tool';
+    meta.appendChild(title);
+
+    const status = document.createElement('span');
+    status.textContent = details.status === 'succeeded'
+      ? 'Status: executed'
+      : `Status: failed (${details.error?.code || 'runtime_error'})`;
+    meta.appendChild(status);
+
+    if (typeof details.timeMs === 'number') {
+      const time = document.createElement('span');
+      time.textContent = `Time: ${details.timeMs}ms`;
+      meta.appendChild(time);
+    }
+
+    if (typeof details.timeoutMs === 'number') {
+      const timeout = document.createElement('span');
+      timeout.textContent = `Timeout: ${details.timeoutMs}ms`;
+      meta.appendChild(timeout);
+    }
+
+    item.appendChild(meta);
+
+    if (details.reason) {
+      const reason = document.createElement('p');
+      reason.className = 'tool-details-reason';
+      reason.textContent = `Plan reason: ${details.reason}`;
+      item.appendChild(reason);
+    }
+
+    if (details.tool === 'js.run_sandbox' && details.input?.code) {
+      appendDetailPre(item, 'JS Code', details.input.code, 'code');
+      if (details.input.args && Object.keys(details.input.args).length > 0) {
+        appendDetailPre(item, 'Arguments', details.input.args);
+      }
+    } else if (details.input && Object.keys(details.input).length > 0) {
+      appendDetailPre(item, 'Input', details.input);
+    }
+
+    if (details.status === 'succeeded') {
+      if (details.result !== undefined) {
+        appendDetailPre(item, 'Result', details.result);
+      }
+      if (Array.isArray(details.logs) && details.logs.length > 0) {
+        appendDetailPre(item, 'Console logs', details.logs);
+      }
+      if (details.stringified) {
+        appendDetailParagraph(item, 'Note', 'Result was stringified for safe rendering.');
+      }
+    } else if (details.error?.detail) {
+      appendDetailPre(item, 'Error detail', details.error.detail);
+    }
+
+    toolDetailsBody.appendChild(item);
+    if (toolDetailsToggle) {
+      setCollapsibleState(toolDetailsBody, toolDetailsToggle, true);
+    }
+  }
+
+  function appendDetailPre(parent, labelText, content, variant = 'json') {
+    if (!parent || content === undefined || content === null) return;
+    const label = document.createElement('div');
+    label.className = 'tool-details-label';
+    label.textContent = labelText;
+
+    const pre = document.createElement('pre');
+    pre.className = variant === 'code' ? 'tool-details-code' : 'tool-details-json';
+    pre.textContent = typeof content === 'string' ? content : prettyPrint(content);
+
+    parent.appendChild(label);
+    parent.appendChild(pre);
+  }
+
+  function appendDetailParagraph(parent, labelText, text) {
+    if (!parent || !text) return;
+    const label = document.createElement('div');
+    label.className = 'tool-details-label';
+    label.textContent = labelText;
+
+    const paragraph = document.createElement('p');
+    paragraph.className = 'tool-details-reason';
+    paragraph.textContent = text;
+
+    parent.appendChild(label);
+    parent.appendChild(paragraph);
+  }
+
+  function prettyPrint(value) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (error) {
+      return String(value);
+    }
   }
 
   function startNewTurn() {
@@ -801,3 +1325,111 @@ Never return explanatory text outside the JSON object.`;
     }
   }
 });
+  function generateJsonRepairCandidates(candidate) {
+    const variants = [];
+    const noDanglingCommas = removeDanglingCommas(candidate);
+    if (noDanglingCommas !== candidate) {
+      variants.push(noDanglingCommas);
+    }
+
+    const withInsertedCommas = insertMissingCommasBetweenStrings(candidate);
+    if (withInsertedCommas !== candidate) {
+      variants.push(withInsertedCommas);
+    }
+
+    const combined = insertMissingCommasBetweenStrings(noDanglingCommas);
+    if (
+      combined !== noDanglingCommas &&
+      combined !== candidate &&
+      !variants.includes(combined)
+    ) {
+      variants.push(combined);
+    }
+
+    return variants;
+  }
+
+  function removeDanglingCommas(text) {
+    if (typeof text !== 'string') {
+      return text;
+    }
+    return text.replace(/,\s*([}\]])/g, '$1');
+  }
+
+  function insertMissingCommasBetweenStrings(text) {
+    if (typeof text !== 'string' || text.indexOf('"') === -1) {
+      return text;
+    }
+
+    let result = '';
+    let inString = false;
+    let escape = false;
+    let changed = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      result += char;
+
+      if (inString) {
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (char === '\\') {
+          escape = true;
+          continue;
+        }
+        if (char === '"') {
+          inString = false;
+          const insertPosition = i + 1;
+          let j = insertPosition;
+          let sawComma = false;
+
+          while (j < text.length) {
+            const lookahead = text[j];
+            if (lookahead === ',') {
+              sawComma = true;
+              break;
+            }
+            if (!/\s/.test(lookahead)) {
+              break;
+            }
+            j++;
+          }
+
+          const nextChar = text[j];
+          if (
+            !sawComma &&
+            nextChar &&
+            nextChar !== ':' &&
+            nextChar !== ']' &&
+            nextChar !== '}' &&
+            isLikelyValueStartChar(nextChar)
+          ) {
+            result += ',';
+            changed = true;
+          }
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+      }
+    }
+
+    return changed ? result : text;
+  }
+
+  function isLikelyValueStartChar(char) {
+    return (
+      char === '"' ||
+      char === '{' ||
+      char === '[' ||
+      char === '-' ||
+      (char >= '0' && char <= '9') ||
+      char === 't' ||
+      char === 'f' ||
+      char === 'n'
+    );
+  }

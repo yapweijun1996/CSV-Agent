@@ -259,16 +259,47 @@ input:checked + .slider:before {
   background: #f8fafc;
 }
 
-.timeline, .tool-plan {
+.timeline, .tool-plan, .tool-details {
   margin-bottom: 12px;
 }
 
-.timeline h4, .tool-plan h4 {
+.timeline h4, .tool-plan h4, .tool-details h4 {
   margin: 0 0 8px 0;
   font-size: 12px;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.toggle-btn {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.toggle-btn:hover,
+.toggle-btn:focus-visible {
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.collapsible {
+  transition: max-height 0.2s ease;
+}
+
+.collapsible.is-collapsed {
+  display: none;
 }
 
 #thinking-log-list {
@@ -354,4 +385,76 @@ input:checked + .slider:before {
 
 .message .tool-result.is-error {
   color: #b91c1c;
+}
+
+.tool-details {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.tool-details-body {
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.tool-details-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.tool-details-item + .tool-details-item {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.tool-details-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tool-details-meta strong {
+  color: var(--text);
+}
+
+.tool-details-reason {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tool-details-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  margin: 12px 0 4px;
+}
+
+.tool-details-label:first-child {
+  margin-top: 0;
+}
+
+.tool-details-code,
+.tool-details-json {
+  background: #0f172a;
+  color: #f1f5f9;
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: "Fira Code", "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 12px;
+  margin: 0 0 8px 0;
+}
+
+.tool-details-json:last-child {
+  margin-bottom: 0;
 }

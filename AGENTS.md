@@ -67,3 +67,25 @@
 * No node js no server needed.
 * fully frontend.
 * when review issues or bug, no need provide code, only breakdown issues or bug only.
+
+
+### Allow Library
+
+* **jQuery JS**
+
+  * Use **one** of the CDNJS 3.7.1 builds:
+
+    * Full (prod): `https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js` — all features incl. Ajax/effects（生产环境常用）
+    * Full (dev): `https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.js` — readable for debugging（开发调试）
+    * Slim (prod): `https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.slim.min.js` — **no Ajax/effects**，更小体积
+    * Slim (dev): `https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.slim.js` — 精简可读版
+    * Source maps (optional for DevTools):
+      `…/jquery.min.map`, `…/jquery.slim.min.map`（无需用 `<script>` 引入）
+  * Tips: lock version `3.7.1`; don’t load full **and** slim together; `.map` files are for debugging only.
+
+* **Chart.js** — UMD, minified（可直接用 `<script>` 引入，暴露全局 `Chart`）
+  `https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js`
+
+  * Use after your `<canvas>` is on the page; pin the version; optionally add SRI/crossorigin.
+  * Example: `new Chart(document.getElementById('id'), { type: 'bar', data, options });`
+

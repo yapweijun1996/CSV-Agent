@@ -14,6 +14,8 @@ Convert the previously decorative `tool_plan` into an actual multi-step workflow
 - [x] Fix LLM prompt/contract so Gemini stops replying “I cannot provide real-time data” after we return a tool result; visible replies should reference the tool output.
 - [x] Harden the system prompt again so time/date requests MUST return a tool plan and can’t respond with “no real-time data”.
 - [x] Add `validateGeminiResponse()` schema enforcement (#5) so malformed responses fail fast on the frontend.
+- [x] Add `js.run_sandbox` worker sandbox (code≤500 chars, timeout guard, denied APIs) plus UI hydration/logging.
+- [ ] Run sandbox acceptance matrix (math, args injection, console log capture, forbidden API, timeout, object result) once UI is wired.
 
 ## Notes
 
@@ -24,6 +26,11 @@ Convert the previously decorative `tool_plan` into an actual multi-step workflow
 - `safeGet()` (in `script.js`) replaces direct `candidates[0].content.parts[0].text` access; any missing leg logs to console and throws an error bubble so JSON repair / UI handling stays consistent.
 - `validateGeminiResponse()` rejects any payload missing string fields, string thinking logs, or at least one valid `{ need_tool, reason }` entry before rendering.
 - Prompt text now threatens contract failure if Gemini tries to dodge real-time requests or forgets to name an allowed tool id when `need_tool=true`.
+- `js.run_sandbox` sanitizes plan args, deep clones data, spawns a dedicated worker with fetch/XMLHttpRequest/WebSocket/importScripts/indexedDB/caches removed, disables `navigator`, freezes allowed globals, captures console output, and enforces termination on timeout so snippets stay compute-only.
+- Timeline now emits `[tool] <name> start`, `[tool] <name> → …`, `[log] …` (when console output exists), `[guard] stringified result` for non-primitive returns, and `[error] <name> <code>` when the sandbox blocks a call or hits timeout.
+- Fixed the system prompt literal so inline instructions use quotes instead of backticks ("return")—prevents `SyntaxError: unexpected token: keyword 'return'` at load time.
+- Thinking log UI gained a hide/show toggle, and a new Tool Details drawer surfaces the exact sandbox code, args, logs, and results (with guard notes) so users can audit executions without digging into DevTools.
+- JSON repair now chains extra heuristics (remove trailing commas, auto-insert missing commas between adjacent string literals) so LLM typos like missing `,` inside `thinking_log` arrays no longer crash the turn.
 
 ## Progress
 
@@ -32,3 +39,5 @@ Convert the previously decorative `tool_plan` into an actual multi-step workflow
 - Added schema validation plus stricter prompt rules to keep time/date questions flowing through the actual tool with no “I can’t” replies.
 - Added placeholder hydration: once a tool succeeds (or fails), we replace `{{tool_result.*}}` tokens inside `visible_reply` with the actual result or `unavailable`, keeping the chat bubble consistent with the Result line.
 - Added robust response parsing guardrails so safety/blocked replies raise “非預期回應” instead of throwing `Cannot read properties of undefined`.
+- Integrated `js.run_sandbox` end-to-end (prompt contract, argument validation, worker sandbox, timeout, log capture, UI timeline, README updates) so compute snippets can run safely inside the browser.
+- Added collapsible controls for the thinking log and a tool details panel that renders sandbox code payloads, execution metadata, and guard notes for each run.
