@@ -268,6 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function clearToolDetails() {
     if (!toolDetailsBody) return;
+    toolDetailsBody.dataset.hasContent = 'false';
     toolDetailsBody.innerHTML = '<p class="tool-details-empty">No tool executions yet.</p>';
     if (toolDetailsToggle) {
       setCollapsibleState(toolDetailsBody, toolDetailsToggle, false);
@@ -622,13 +623,14 @@ Never return explanatory text outside the JSON object.`;
     replyDiv.textContent = response.visible_reply;
     replyDiv.dataset.template = response.visible_reply || '';
 
-    const toolResultDiv = document.createElement('div');
-    toolResultDiv.className = 'tool-result';
-    toolResultDiv.dataset.visible = 'false';
+    // Container that holds a running list of per-step results.
+    const toolResultContainer = document.createElement('div');
+    toolResultContainer.className = 'tool-result-stack';
+    toolResultContainer.dataset.role = 'tool-result-stack';
 
     messageDiv.appendChild(restatementDiv);
     messageDiv.appendChild(replyDiv);
-    messageDiv.appendChild(toolResultDiv);
+    messageDiv.appendChild(toolResultContainer);
     messageList.appendChild(messageDiv);
     scrollToBottom();
 
@@ -641,37 +643,91 @@ Never return explanatory text outside the JSON object.`;
     });
 
     // 3. Render the tool plan + execution
-    const planEntry = Array.isArray(response.tool_plan) ? response.tool_plan[0] : null;
-    if (!planEntry) {
+    await runToolPlan(response.tool_plan, {
+      response,
+      userInput,
+      turn,
+      replyElement: replyDiv,
+      toolResultContainer
+    });
+    finishTurn(turn);
+  }
+
+  /**
+   * Executes every plan step sequentially so the agent behaves like an iterative worker.
+   * @param {Array<object>} rawPlanEntries
+   * @param {object} context
+   */
+  async function runToolPlan(rawPlanEntries, context) {
+    const planEntries = Array.isArray(rawPlanEntries) ? rawPlanEntries : [];
+    if (!planEntries.length) {
       setToolPlanMessage('No next step determined.');
-      finishTurn(turn);
       return;
     }
+
+    appendThinkingLogEntry(`[plan] 準備執行 ${planEntries.length} 步`);
+    setToolPlanMessage(`Plan ready: ${planEntries.length} steps`);
+
+    let encounteredFailure = false;
+    for (let index = 0; index < planEntries.length; index++) {
+      const stepInfo = { index, total: planEntries.length };
+      const status = await runSinglePlanStep(planEntries[index], context, stepInfo);
+      if (status === 'failed') {
+        encounteredFailure = true;
+      }
+    }
+
+    if (!encounteredFailure) {
+      setToolPlanMessage(`Plan complete (${planEntries.length} steps)`);
+    } else {
+      setToolPlanMessage(`Plan finished with issues (${planEntries.length} steps)`);
+      appendThinkingLogEntry('[plan] 計畫完成但包含失敗步驟');
+    }
+  }
+
+  /**
+   * Handles one entry from the tool plan.
+   * @param {object} planEntry
+   * @param {object} context
+   * @param {{index:number,total:number}} stepInfo
+   */
+  async function runSinglePlanStep(planEntry, context, stepInfo) {
+    if (!planEntry || typeof planEntry !== 'object') {
+      appendThinkingLogEntry(`[warn] ${formatStepLabel(stepInfo)} 無效計畫項目`);
+      return 'failed';
+    }
+
+    const reason = planEntry.reason || 'No specific reason provided.';
+    appendThinkingLogEntry(`[plan] ${formatStepLabel(stepInfo)} - ${reason}`);
 
     if (!planEntry.need_tool) {
-      setToolPlanMessage(`No tool needed. Reason: ${planEntry.reason || 'No specific reason provided.'}`);
-      finishTurn(turn);
-      return;
+      appendThinkingLogEntry(`[decide] ${formatStepLabel(stepInfo)} 無需工具`);
+      showNoToolStep(planEntry, stepInfo);
+      return 'skipped';
     }
 
-    const resolvedTool = resolveToolFromPlan(planEntry, response, userInput);
+    const resolvedTool = resolveToolFromPlan(planEntry, context.response, context.userInput);
     if (!resolvedTool) {
-      handleUnsupportedTool(planEntry);
-      finishTurn(turn);
-      return;
+      handleUnsupportedTool(planEntry, stepInfo);
+      return 'failed';
     }
 
     if (resolvedTool.inferred) {
       appendThinkingLogEntry('[plan] 推斷時間意圖，改用 get_current_date');
     }
 
-    await executeToolWithUi(resolvedTool.name, planEntry.reason, {
-      turn,
-      toolResultDiv,
-      replyElement: replyDiv,
-      planEntry
+    const result = await executeToolWithUi(resolvedTool.name, reason, {
+      ...context,
+      planEntry,
+      stepInfo
     });
-    finishTurn(turn);
+    return result === 'succeeded' ? 'succeeded' : 'failed';
+  }
+
+  function showNoToolStep(planEntry, stepInfo) {
+    const prefix = formatStepPrefix(stepInfo);
+    const reason = planEntry.reason || 'No specific reason provided.';
+    setToolPlanMessage(`${prefix}No tool needed - ${reason}`);
   }
 
   /**
@@ -717,8 +773,8 @@ Never return explanatory text outside the JSON object.`;
   async function executeToolWithUi(toolName, reason, context) {
     const tool = TOOL_REGISTRY[toolName];
     if (!tool) {
-      handleUnsupportedTool({ tool: toolName, reason });
-      return;
+      handleUnsupportedTool({ tool: toolName, reason }, context.stepInfo);
+      return 'failed';
     }
 
     let toolInput;
@@ -727,13 +783,15 @@ Never return explanatory text outside the JSON object.`;
     } catch (inputError) {
       console.error(`Tool ${toolName} input error:`, inputError);
       appendThinkingLogEntry(`[error] ${toolName} args invalid`);
-      revealToolResult(context.toolResultDiv, 'unavailable', true);
-      showToolPlanFailure(toolName);
-      setToolPlanMessage(`Failed: ${toolName} - ${inputError.message}`);
-      return;
+      revealToolResult(context.toolResultContainer, 'unavailable', {
+        stepInfo: context.stepInfo,
+        isError: true
+      });
+      showToolPlanFailure(`${toolName} - ${inputError.message}`, context.stepInfo);
+      return 'failed';
     }
 
-    showToolPlanExecuting(toolName, reason);
+    showToolPlanExecuting(toolName, reason, context.stepInfo);
     appendThinkingLogEntry(`[tool] ${toolName} start`);
     context.turn.toolRuns.push({ tool: toolName, status: 'started', args: toolInput });
 
@@ -753,8 +811,8 @@ Never return explanatory text outside the JSON object.`;
         appendThinkingLogEntry('[guard] stringified result');
       }
       appendThinkingLogEntry('[decide] fulfilled');
-      revealToolResult(context.toolResultDiv, readable, false);
-      showToolPlanExecuted(toolName);
+      revealToolResult(context.toolResultContainer, readable, { stepInfo: context.stepInfo });
+      showToolPlanExecuted(toolName, context.stepInfo);
       updateVisibleReplyWithToolResult(context.replyElement, result);
       renderToolDetails({
         tool: toolName,
@@ -767,6 +825,7 @@ Never return explanatory text outside the JSON object.`;
         timeoutMs: toolInput?.timeoutMs,
         stringified: Boolean(result?.stringified)
       });
+      return 'succeeded';
     } catch (error) {
       console.error(`Tool ${toolName} failed:`, error);
       const errorCode = error?.code || 'runtime_error';
@@ -778,8 +837,11 @@ Never return explanatory text outside the JSON object.`;
         code: errorCode
       };
       appendThinkingLogEntry(`[error] ${toolName} ${errorCode}`);
-      revealToolResult(context.toolResultDiv, 'unavailable', true);
-      showToolPlanFailure(`${toolName} (${errorCode})`);
+      revealToolResult(context.toolResultContainer, 'unavailable', {
+        stepInfo: context.stepInfo,
+        isError: true
+      });
+      showToolPlanFailure(`${toolName} (${errorCode})`, context.stepInfo);
       updateVisibleReplyWithToolResult(context.replyElement, null, { fallbackValue: 'unavailable' });
       renderToolDetails({
         tool: toolName,
@@ -792,6 +854,7 @@ Never return explanatory text outside the JSON object.`;
         },
         timeoutMs: toolInput?.timeoutMs
       });
+      return 'failed';
     }
   }
 
@@ -1089,24 +1152,46 @@ Never return explanatory text outside the JSON object.`;
       .toLowerCase();
   }
 
-  function handleUnsupportedTool(planEntry) {
+  function formatStepLabel(stepInfo) {
+    if (
+      !stepInfo ||
+      typeof stepInfo.index !== 'number' ||
+      typeof stepInfo.total !== 'number' ||
+      stepInfo.total <= 0
+    ) {
+      return 'Step';
+    }
+    const current = stepInfo.index + 1;
+    return `Step ${current}/${stepInfo.total}`;
+  }
+
+  function formatStepPrefix(stepInfo) {
+    const label = formatStepLabel(stepInfo);
+    return label === 'Step' ? '' : `${label} · `;
+  }
+
+  function handleUnsupportedTool(planEntry, stepInfo) {
     const label = planEntry.tool || 'unspecified';
     appendThinkingLogEntry(`[warn] unsupported tool: ${label}`);
     const suffix = planEntry.reason ? ` - ${planEntry.reason}` : '';
-    setToolPlanMessage(`Unsupported tool: ${label}${suffix}`);
+    const prefix = formatStepPrefix(stepInfo);
+    setToolPlanMessage(`${prefix}Unsupported tool: ${label}${suffix}`);
   }
 
-  function showToolPlanExecuting(toolName, reason) {
+  function showToolPlanExecuting(toolName, reason, stepInfo) {
     const suffix = reason ? ` - ${reason}` : '';
-    setToolPlanMessage(`Tool: ${toolName}${suffix}`, { spinner: true });
+    const prefix = formatStepPrefix(stepInfo);
+    setToolPlanMessage(`${prefix}Tool: ${toolName}${suffix}`, { spinner: true });
   }
 
-  function showToolPlanExecuted(toolName) {
-    setToolPlanMessage(`Executed: ${toolName}`);
+  function showToolPlanExecuted(toolName, stepInfo) {
+    const prefix = formatStepPrefix(stepInfo);
+    setToolPlanMessage(`${prefix}Executed: ${toolName}`);
   }
 
-  function showToolPlanFailure(toolName) {
-    setToolPlanMessage(`Failed: ${toolName}`);
+  function showToolPlanFailure(text, stepInfo) {
+    const prefix = formatStepPrefix(stepInfo);
+    setToolPlanMessage(`${prefix}Failed: ${text}`);
   }
 
   function setToolPlanMessage(text, options = {}) {
@@ -1122,15 +1207,17 @@ Never return explanatory text outside the JSON object.`;
     }
   }
 
-  function revealToolResult(element, value, isError = false) {
-    if (!element) return;
-    element.textContent = `Result: ${value}`;
-    element.dataset.visible = 'true';
-    if (isError) {
-      element.classList.add('is-error');
-    } else {
-      element.classList.remove('is-error');
+  function revealToolResult(container, value, options = {}) {
+    if (!container) return;
+    const line = document.createElement('div');
+    line.className = 'tool-result';
+    const prefix = formatStepPrefix(options.stepInfo);
+    const label = options.label || 'Result';
+    line.textContent = `${prefix}${label}: ${value}`;
+    if (options.isError) {
+      line.classList.add('is-error');
     }
+    container.appendChild(line);
   }
 
   function updateVisibleReplyWithToolResult(element, toolResult, options = {}) {
@@ -1203,7 +1290,10 @@ Never return explanatory text outside the JSON object.`;
 
   function renderToolDetails(details) {
     if (!toolDetailsBody || !details) return;
-    toolDetailsBody.innerHTML = '';
+    if (toolDetailsBody.dataset.hasContent !== 'true') {
+      toolDetailsBody.innerHTML = '';
+      toolDetailsBody.dataset.hasContent = 'true';
+    }
 
     const item = document.createElement('div');
     item.className = 'tool-details-item';

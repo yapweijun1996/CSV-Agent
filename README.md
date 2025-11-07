@@ -14,9 +14,11 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 
 1. **Diagnose** – `handleSend()` captures the user's question, logs it in chat, clears the thinking panel, and disables inputs so only one action runs at a time.
 2. **Plan** – Gemini is prompted (see `getSystemPrompt()`) to return `restatement`, `visible_reply`, `thinking_log[]`, and a `tool_plan[]`. We parse/repair JSON strictly before touching the UI.
-3. **Execute** – `renderLlmResponse()` paints the chat + thinking log, inspects the first `tool_plan` entry, and decides what to do next:
-   - If `need_tool=false`, the Next Step card simply explains why no action is required.
-   - If `need_tool=true`, we resolve the tool via alias mapping or intent inference (date/time keywords across the plan, restatement, reply, and user input) and run it.
+3. **Execute** – `renderLlmResponse()` now hands the entire `tool_plan[]` to `runToolPlan()`, which works through every step sequentially (small-step worker style):
+   - Each step logs `Step i/n - …` into the thinking log so observers can trace progress.
+   - `need_tool=false` steps still surface their reasoning but short‑circuit without launching code.
+   - `need_tool=true` steps resolve the tool via alias mapping or keyword inference and call `executeToolWithUi()` with a spinner + status scoped to that step.
+   - Unsupported plans/failed runs mark the step as failed and the plan summary card flips to “Plan finished with issues”.
 4. **Log** – While a tool runs, Next Step shows `Tool: <name>` plus a micro spinner. Once finished it flips to `Executed:` or `Failed:`. Thinking log entries append `[tool]`, `[decide]`, `[warn]`, or `[error]` markers so the user sees exactly what happened. Each turn stores a `toolRuns[]` record in memory for debugging.
 5. **Verify** – Chat messages append a `Result: …` line (local time or `unavailable` on failure), the timeline notes `[tool] get_current_date → …` and either `[decide] fulfilled` or `[error] get_current_date failed`, and inputs are re-enabled for the next prompt.
 
@@ -32,6 +34,7 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 - **Registry** – Defined in `script.js` (`TOOL_REGISTRY`). `get_current_date` returns `{ iso, local, epochMs }` with alias mapping across `get_current_date`, `clock.now`, `time.now`, and `get_time`. New in this iteration: `js.run_sandbox`, a worker-backed compute tool for tiny math/array/data snippets.
 - **Sandbox tool** – The plan must provide `args: { code, args?, timeoutMs? }`. We enforce ≤500 chars of code, clamp the timeout to 50–1500 ms (default 500 ms), deep-clone any `args`, and run the snippet inside a dedicated Web Worker that deletes/blocks `fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `indexedDB`, `caches`, and `navigator`. Allowed globals (`Math`, `Date`, primitives, typed arrays, etc.) are frozen, console output is captured, and the worker auto-terminates on timeout. Results come back as `{ result, logs[], timeMs }` with non-primitive values JSON-stringified so the UI can drop `{{tool_result.result}}` directly into replies.
 - **Intent fallback** – When Gemini sets `need_tool=true` but omits the `tool` field, we scan the plan reason + restatement + reply + original user input for Chinese/English time keywords. If matched, the agent logs `[plan] 推斷時間意圖...` and routes to `get_current_date` automatically.
+- **Per-step UI states** – Every tool step renders its own `Result:` line (`Step i/n · Result: …`) under the assistant message, so multi-tool runs leave a visible breadcrumb trail. The Next Step card also includes the step prefix plus spinner/status, and the summary flips to “Plan finished with issues” whenever any step fails.
 - **UI contract** – Every tool run now logs `[tool] <name> start` followed by either `[tool] <name> → …` or `[error] <name> <code>`. Sandbox runs also append `[log] [...]` when console output exists and `[guard] stringified result` whenever we had to stringify a complex return value. Success updates the chat bubble (`Result: …`, placeholders hydrated), updates the Next Step card to `Executed: <name>`, and records `[decide] fulfilled`. Failures flip the card to `Failed`, mark the timeline with `[error] ...`, and show `Result: unavailable`.
 - **Unsupported tools** – Any non-whitelisted tool names emit `[warn] unsupported tool: <name>` in the timeline and keep the session stable so engineers can diagnose prompt issues without a crash.
 

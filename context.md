@@ -2,10 +2,12 @@
 
 ## Goal
 
-Convert the previously decorative `tool_plan` into an actual multi-step workflow: when Gemini decides a supported tool is needed (e.g., current date/time), the frontend executes it, writes the result back into chat, timeline, and the Next Step card, and keeps everything observable for engineers.
+Convert the previously decorative `tool_plan` into an actual multi-step workflow: when Gemini decides a supported tool is needed (e.g., current date/time), the frontend executes it, writes the result back into chat, timeline, and the Next Step card, and keeps everything observable for engineers. The runner now needs to process every plan entry sequentially (Step i/n), log outcomes, and surface stacked results so multi-tool tasks stay debuggable.
 
 ## TODO
 
+- [x] Promote `tool_plan[]` into a sequential runner that walks every step and updates the Next Step card with `Step i/n`.
+- [x] Stack per-step `Result:` rows + tool detail entries so engineers can audit multi-tool turns.
 - [x] Audit the existing chat/thinking/plan rendering to understand current state handling.
 - [x] Implement `get_current_date` tool execution (alias mapping, thinking log updates, spinner UI, chat result lines).
 - [x] Document the architecture + flow inside `README.md`.
@@ -15,13 +17,14 @@ Convert the previously decorative `tool_plan` into an actual multi-step workflow
 - [x] Harden the system prompt again so time/date requests MUST return a tool plan and can’t respond with “no real-time data”.
 - [x] Add `validateGeminiResponse()` schema enforcement (#5) so malformed responses fail fast on the frontend.
 - [x] Add `js.run_sandbox` worker sandbox (code≤500 chars, timeout guard, denied APIs) plus UI hydration/logging.
+- [ ] Smoke test multi-step plan scenarios (no-tool step, 2+ tool steps, failure) to ensure the new runner/UI wiring holds up.
 - [ ] Run sandbox acceptance matrix (math, args injection, console log capture, forbidden API, timeout, object result) once UI is wired.
 
 ## Notes
 
 - Tool aliases: `get_current_date`, `clock.now`, `time.now`, `get_time`. Missing tool names fall back via keyword intent detection across the plan reason, restatement, reply, and original user input.
 - Thinking log doubles as the timeline. We append `[tool] …`, `[decide] fulfilled`, `[warn] …`, `[error] …` events so users can follow each step.
-- Next Step card now has spinner state (“Tool: …”), success (“Executed: …”), failure (“Failed: …”), and unsupported tool messaging.
+- Next Step card now has spinner state (“Tool: …”), success (“Executed: …”), failure (“Failed: …”), unsupported tool messaging, plus `Step i/n` prefixes and an overall “Plan finished with issues” summary whenever any step fails.
 - Each chat turn stores a `toolRuns[]` array in memory for potential debugging/telemetry later.
 - `safeGet()` (in `script.js`) replaces direct `candidates[0].content.parts[0].text` access; any missing leg logs to console and throws an error bubble so JSON repair / UI handling stays consistent.
 - `validateGeminiResponse()` rejects any payload missing string fields, string thinking logs, or at least one valid `{ need_tool, reason }` entry before rendering.
@@ -40,4 +43,5 @@ Convert the previously decorative `tool_plan` into an actual multi-step workflow
 - Added placeholder hydration: once a tool succeeds (or fails), we replace `{{tool_result.*}}` tokens inside `visible_reply` with the actual result or `unavailable`, keeping the chat bubble consistent with the Result line.
 - Added robust response parsing guardrails so safety/blocked replies raise “非預期回應” instead of throwing `Cannot read properties of undefined`.
 - Integrated `js.run_sandbox` end-to-end (prompt contract, argument validation, worker sandbox, timeout, log capture, UI timeline, README updates) so compute snippets can run safely inside the browser.
-- Added collapsible controls for the thinking log and a tool details panel that renders sandbox code payloads, execution metadata, and guard notes for each run.
+- Added collapsible controls for the thinking log and a tool details panel that renders sandbox code payloads, execution metadata, and guard notes for each run. The drawer now appends entries instead of replacing them, so multiple tool executions stay visible.
+- The plan executor (`runToolPlan` + `runSinglePlanStep`) now iterates through every LLM step, logs `Step i/n - …`, pushes individual result rows, and downgrades the plan card to “Plan finished with issues” if any tool fails.
