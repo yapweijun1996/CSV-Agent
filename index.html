@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CSV Data Analysis Agent</title>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --text: #0f172a;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --accent: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden; /* Prevent body scroll */
+  }
+  .main-layout {
+    display: grid;
+    grid-template-columns: 1fr 5px 400px;
+    height: 100vh;
+  }
+  .content-area {
+    padding: 24px;
+    overflow-y: auto;
+  }
+  .assistant-sidebar {
+    padding: 24px;
+    overflow-y: auto;
+    background: #f1f5f9; /* Slight tint to distinguish */
+  }
+  .resizer {
+    background: var(--border);
+    cursor: col-resize;
+  }
+</style>
+</head>
+<body>
+
+<div class="main-layout" id="main-layout">
+  <main class="content-area">
+    <h2>Main Panel</h2>
+    <p>This is the main content area.</p>
+  </main>
+
+  <div class="resizer" id="resizer"></div>
+
+  <aside class="assistant-sidebar">
+    <h2>Assistant Panel</h2>
+    <p>This is the assistant panel.</p>
+  </aside>
+</div>
+
+<script>
+  const resizer = document.getElementById('resizer');
+  const mainLayout = document.getElementById('main-layout');
+  let isResizing = false;
+
+  resizer.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', () => {
+      isResizing = false;
+      document.removeEventListener('mousemove', handleMouseMove);
+    }, { once: true });
+  });
+
+  function handleMouseMove(e) {
+    if (!isResizing) return;
+    const sidebarWidth = window.innerWidth - e.clientX - (resizer.offsetWidth / 2);
+    if (sidebarWidth > 200 && sidebarWidth < window.innerWidth - 300) { // Min/max widths
+      mainLayout.style.gridTemplateColumns = `1fr 5px ${sidebarWidth}px`;
+    }
+  }
+</script>
+
+</body>
+</html>
