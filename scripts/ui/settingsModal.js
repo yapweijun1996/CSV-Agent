@@ -1,4 +1,6 @@
-export function initSettingsModal({ openBtn, modal, closeBtn, saveBtn, apiInput, modelInput }) {
+import { testGeminiConnection } from '../api/connectionTester.js';
+
+export function initSettingsModal({ openBtn, modal, closeBtn, saveBtn, testBtn, apiInput, modelInput }) {
   if (!modal) return;
   const open = () => {
     modal.style.display = 'block';
@@ -28,5 +30,29 @@ export function initSettingsModal({ openBtn, modal, closeBtn, saveBtn, apiInput,
     localStorage.setItem('gemini-model', model);
     alert('Settings saved successfully!');
     close();
+  });
+
+  // Allow operators to validate their Gemini credentials before committing settings.
+  testBtn?.addEventListener('click', async () => {
+    const apiKey = apiInput.value.trim() || localStorage.getItem('gemini-api-key') || '';
+    const model = modelInput.value.trim() || localStorage.getItem('gemini-model') || 'gemini-pro';
+    if (!apiKey) {
+      alert('Enter an API Key before testing the connection.');
+      return;
+    }
+
+    const originalText = testBtn.textContent;
+    testBtn.disabled = true;
+    testBtn.textContent = 'Testing...';
+    try {
+      const result = await testGeminiConnection({ apiKey, model });
+      alert(`Connection successful!\nModel: ${result.displayName}\nVersion: ${result.version}`);
+    } catch (error) {
+      console.error('Test connection failed', error);
+      alert(`Connection failed: ${error.message || 'Unknown error'}`);
+    } finally {
+      testBtn.disabled = false;
+      testBtn.textContent = originalText;
+    }
   });
 }

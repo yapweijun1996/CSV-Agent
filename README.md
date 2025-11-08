@@ -9,6 +9,7 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
 - `scripts/` – ES module tree, each file ≤200 lines and scoped to one role:
   - `app.js` – Entry point that wires DOM events, Gemini calls, and tool execution.
   - `api/geminiClient.js` – Fetch wrapper, system prompt, JSON repair, schema validation.
+  - `api/connectionTester.js` – Lightweight “Test Connection” ping used by the settings modal before persisting credentials.
   - `state/sessionState.js` – Turn bookkeeping + `toolRuns` mutations.
   - `state/memoryStore.js` – IndexedDB-backed cache of recent turns (intent, tool plan, replies) used for follow-up context + the Clear Memory control.
   - `ui/*.js` – View-specific controllers (`chatView`, `thinkingLog`, `toolPlanPanel`, `toolDetailsDrawer`, `summaryBar`, `settingsModal`, `resizer`, `progressHud`).
@@ -17,6 +18,10 @@ A pure HTML/CSS/JS front-end that talks to Gemini, enforces a JSON contract, and
   - `utils/*.js` – Shared helpers (DOM, perf, JSON repair, template hydration, deep-path access, text formatting).
 - `context.md` – Live notebook containing the current goal/TODO/notes/progress for the engineering session.
 - `AGENTS.md` – Product rules and operating instructions the agent must follow.
+
+### Settings Modal UX
+
+- Operators can now click **Test Connection** to confirm that their API key/model pair reaches Gemini before saving; the button briefly disables, shows a “Testing…” label, and surfaces the success/error outcome via modal alert so the workflow mirrors the agent’s step-by-step transparency expectations.
 
 ## Runtime Flow (Iterative Worker)
 

@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
     modal: elements.settingsModal,
     closeBtn: elements.modalCloseBtn,
     saveBtn: elements.saveSettingsBtn,
+    testBtn: elements.testConnectionBtn,
     apiInput: elements.apiKeyInput,
     modelInput: elements.modelInput
   });
@@ -110,6 +111,7 @@ function cacheDom() {
     toolDetailsToggle: document.getElementById('tool-details-toggle'),
     settingsBtn: document.getElementById('settings-btn'),
     clearMemoryBtn: document.getElementById('clear-memory-btn'),
+    testConnectionBtn: document.getElementById('test-connection-btn'),
     settingsModal: document.getElementById('settings-modal'),
     modalCloseBtn: document.querySelector('.modal-content .close-btn'),
     saveSettingsBtn: document.getElementById('save-settings-btn'),

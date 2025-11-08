@@ -16,6 +16,7 @@ Deliver a Vanilla JS front-end that acts like a transparent, iterative worker: t
 - [ ] Manual QA: run the savings-projection scenario (clock + sandbox + aggregate), zero-deposit case, and forced failure (bad code / timeout) once time permits.
 - [ ] Dark-mode tokens + toggle to round out the refreshed look.
 - [x] Conversation memory: persist prior turn parameters (start balance, deposit, APR, horizon, etc.) so follow-up prompts like “same but 24 months” can reuse context. Explore lightweight storage (in-memory queue vs. IndexedDB) that still respects the no-backend constraint.
+- [x] Hook up the Settings “Test Connection” button so it pings Gemini and reports success/failure before credentials are saved.
 
 ## Notes
 
@@ -37,6 +38,8 @@ Deliver a Vanilla JS front-end that acts like a transparent, iterative worker: t
 - Host-side contract now enforces that any turn with `need_tool: true` must include at least one `{{tool_result.*}}` or `{{tool.alias.*}}` placeholder inside `visible_reply`. This prevents Gemini from replying with “unavailable” despite having tool data; violating responses get rejected before the plan runs.
 - 2025-11-07: Confirmed current system date/time for quick operator reference via CLI `date`.
 - 2025-11-07: Logged user-provided `get_current_date` screenshot/telemetry (plan reason + “Today's date is unavailable” fallback) to keep agent UI behavior traceable.
+- 2025-11-08: Added `scripts/api/connectionTester.js` and wired the Settings modal button to surface “Testing…” status + success/failure alerts so onboarding flows are auditable without checking console logs.
+- 2025-11-07: New operator session opened (user greeting “hi”); ready for next instructions.
 
 ## Progress
 
