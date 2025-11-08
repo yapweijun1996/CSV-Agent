@@ -1,60 +1,68 @@
-# CSV Agent – Multi-Step Tool Runner Upgrade
+# CSV Agent — Developer Context (Compact)
 
-## Goal
+## Mission
 
-Deliver a Vanilla JS front-end that acts like a transparent, iterative worker: the agent must execute every `tool_plan` step sequentially, support `save_as` aliases + `$tool.*` references, hydrate named placeholders in the visible reply, expose a `math.aggregate` helper for post-processing sandbox output, and surface a detailed audit trail (thinking log, plan board, tool details, summary bar, execution HUD) while keeping the codebase modular (`type="module"`, single-responsibility files ≤300 lines).
+Deliver a Vanilla JS front‑end agent that executes multi‑step tool plans sequentially, supports save_as aliases and $tool.<alias> references, hydrates placeholders into visible replies, exposes a math.aggregate helper for post‑processing, and surfaces a transparent audit trail (Thinking Log, Plan Board, Tool Details, Summary Bar, Progress HUD). Keep ES modules small and single‑responsibility.
 
-## TODO
+## Architecture (Vanilla + ES Modules)
 
-- [x] Split the legacy 1.8k-line script into ES modules (`scripts/` tree) covering API, state, UI, tooling, and utilities.
-- [x] Replace the Next Step text block with a multi-step board showing Planned → Executing → Executed/Failed/Skipped (with badges + auto-expansion).
-- [x] Implement the save-as registry, `$tool.<alias>.<path>` resolver, sequential runner, and halt-on-failure guardrails.
-- [x] Hydrate replies with both `{{tool_result.*}}` (last result) and `{{tool.<alias>.*}}`, plus fallback `unavailable`.
-- [x] Update README + context to document the new architecture/contract so future engineers can maintain it cheaply.
-- [x] Visual polish pass: Progress HUD, refreshed chat/composer skin, plan badge micro-transitions.
-- [x] Fix reply placeholder hydration for sandbox/math results so `{{tool_result.balance}}` style tokens stop rendering `unavailable` when the returned data lives under `result.*`.
-- [ ] Manual QA: run the savings-projection scenario (clock + sandbox + aggregate), zero-deposit case, and forced failure (bad code / timeout) once time permits.
-- [ ] Dark-mode tokens + toggle to round out the refreshed look.
-- [x] Conversation memory: persist prior turn parameters (start balance, deposit, APR, horizon, etc.) so follow-up prompts like “same but 24 months” can reuse context. Explore lightweight storage (in-memory queue vs. IndexedDB) that still respects the no-backend constraint.
-- [x] Hook up the Settings “Test Connection” button so it pings Gemini and reports success/failure before credentials are saved.
+- Entry: [index.html](index.html), [scripts/app.js](scripts/app.js)
+- API: [scripts/api/geminiClient.js](scripts/api/geminiClient.js), [scripts/api/connectionTester.js](scripts/api/connectionTester.js)
+- State: [scripts/state/sessionState.js](scripts/state/sessionState.js), [scripts/state/memoryStore.js](scripts/state/memoryStore.js)
+- Tools: [scripts/tools/planExecutor.js](scripts/tools/planExecutor.js), [scripts/tools/registry.js](scripts/tools/registry.js), [scripts/tools/sandboxRunner.js](scripts/tools/sandboxRunner.js), [scripts/tools/mathAggregate.js](scripts/tools/mathAggregate.js), [scripts/tools/constants.js](scripts/tools/constants.js)
+- UI: [scripts/ui/chatView.js](scripts/ui/chatView.js), [scripts/ui/toolPlanPanel.js](scripts/ui/toolPlanPanel.js), [scripts/ui/toolDetailsDrawer.js](scripts/ui/toolDetailsDrawer.js), [scripts/ui/thinkingLog.js](scripts/ui/thinkingLog.js), [scripts/ui/progressHud.js](scripts/ui/progressHud.js), [scripts/ui/insightsPanel.js](scripts/ui/insightsPanel.js), [scripts/ui/summaryBar.js](scripts/ui/summaryBar.js), [scripts/ui/settingsModal.js](scripts/ui/settingsModal.js)
+- Utils: [scripts/utils/jsonRepair.js](scripts/utils/jsonRepair.js), [scripts/utils/text.js](scripts/utils/text.js), [scripts/utils/dom.js](scripts/utils/dom.js), [scripts/utils/perf.js](scripts/utils/perf.js), [scripts/utils/objectPath.js](scripts/utils/objectPath.js), [scripts/utils/template.js](scripts/utils/template.js)
 
-## Notes
+## Execution Model & Contract
 
-- Each plan step is assigned `save_as` (auto `_stepN` if missing, with `[guard] auto save_as=…` logged) and rendered in `tool_plan_list`; badges change color as states evolve and the active row expands to show reasoning + resolved args. The active card also receives an accent border while it is executing.
-- The new execution HUD (`scripts/ui/progressHud.js`) mirrors the runner (“Listening” → “Executing step” → “Plan complete/failed”) with a live step counter, active-tool pill, and progress bar tapped from the plan executor hooks.
-- Message bubbles + composer now use elevated cards and tool-result chips so the assistant looks closer to the screenshot reference instead of plain blocks.
-- Added an `insightsPanel` toggle (collapsed by default, state persisted via `localStorage`) so the Thinking Log/Plan/Tool Details stack stays hidden until the user clicks “Show details”; this lives in `scripts/ui/insightsPanel.js`.
-- Chat input stays focusable even when the agent is executing (`scripts/app.js` keeps the textarea enabled and only disables the send button via an `isAgentBusy` guard).
-- The arg resolver walks nested objects/arrays, replacing strings shaped like `$tool.alias.path` with actual values from earlier runs. Missing refs emit `[guard] missing ref …` and abort the plan.
-- `turn.toolRuns[]` now captures `{ tool, save_as, argsRaw, argsResolved, startedAt, endedAt, timeMs, status, result|error }` and drives both the Tool Details drawer and any future telemetry hook-ups.
-- The Thinking Log doubles as the timeline; we log `[plan]`, `[tool]`, `[log]`, `[guard]`, `[error]`, and `[decide]` markers so QA can replay every decision without devtools.
-- Summary bar buttons stay synced with the collapsible panels (clicking either toggles Thinking Log + Tool Details in lockstep, with the same expanded state mirrored via `aria-expanded`).
-- `scripts/tools/sandboxRunner.js` removes network/storage APIs, freezes globals, deep-clones JSON-safe objects, and only stringifies results when cloning fails so downstream `$tool.alias.result.foo` dereferences stay intact.
-- Sandbox snippet cap raised to 1000 characters (was 500) so compound-interest style snippets no longer trip the guard; docs + system prompt updated accordingly.
-- `math.aggregate` lives in `tools/mathAggregate.js` and is exposed via the registry so plans can run sandbox → aggregate chains (sum/avg/min/max) without writing extra JavaScript code.
-- Result normalization now hoists any `result.*` fields onto the placeholder record **and** backfills a `.result` snapshot even for flat payloads, so `{{tool_result.local}}`, `{{tool_result.result.local}}`, and `$tool.schedule.result.balance` all Just Work. The hydrator will also fall back to `.result.*` whenever the flattened property is missing, keeping older prompts backwards compatible.
-- IndexedDB-backed `memoryStore` captures the last few turns (user input, restatement, reply, tool_plan). `callGeminiApi()` injects `previous_intent`, `last_tool_plan`, and a short history string whenever available so “same but 24 months” inherits the prior parameters by default. The header exposes a “Clear Memory” button that wipes the store and logs `[log] Conversation memory cleared …`. QA recipe: run the 12‑month scenario, then ask “Same but 24 months” (should reuse data) and finally clear memory + repeat to ensure it requests clarification again.
-- `repairJson()` now strips stray non-ASCII glyphs that appear outside quoted strings (e.g., the LLM inserting `をやめましょう。` between braces) before running the usual comma fixes, so malformed follow-up payloads can still be parsed instead of halting the turn.
-- Host-side contract now enforces that any turn with `need_tool: true` must include at least one `{{tool_result.*}}` or `{{tool.alias.*}}` placeholder inside `visible_reply`. This prevents Gemini from replying with “unavailable” despite having tool data; violating responses get rejected before the plan runs.
-- 2025-11-07: Confirmed current system date/time for quick operator reference via CLI `date`.
-- 2025-11-07: Logged user-provided `get_current_date` screenshot/telemetry (plan reason + “Today's date is unavailable” fallback) to keep agent UI behavior traceable.
-- 2025-11-08: Added `scripts/api/connectionTester.js` and wired the Settings modal button to surface “Testing…” status + success/failure alerts so onboarding flows are auditable without checking console logs.
-- 2025-11-07: New operator session opened (user greeting “hi”); ready for next instructions.
+- Plans execute strictly in order; on failure the run halts (no partial continuation).
+- Each step has a save_as alias (auto _stepN if missing; inference is logged).
+- Arguments may reference prior results using $tool.alias.path; resolver supports nested objects/arrays; missing references log a guard note and abort the plan.
+- Plan board shows Planned → Executing → Done/Failed/Skipped with badges; the active card expands to show reasoning and resolved args.
+- Host contract: when need_tool is true, visible_reply must include at least one placeholder that binds tool data; otherwise the turn is rejected before execution.
 
-## Progress
+## Placeholder Hydration (Replies)
 
-- Modularized the frontend into `scripts/` (app orchestrator, UI controllers, state, API, tools, utils) and updated `index.html` to load the entry module.
-- Built the multi-step board UI (status chips, reason/arg blocks, skipped markers) and the new CSS tokens to keep each file under 20 KB.
-- Added the named-result registry + resolver, template hydration for `{{tool.<alias>.*}}`, and a `$tool`-aware arg sanitizer so later steps can safely reuse earlier outputs.
-- Instrumented timeline + summary telemetry: each step logs start/done/error (with durations, console logs, guard notes) and the summary aggregates tool counts/durations with live badges.
-- Tool Details now auto-expands for the active run, rendering code/args/result/logs/errors while keeping previous runs visible.
-- README/context refreshed with the new architecture, tool contract, and outstanding QA TODOs so the next engineer immediately understands the flow.
-- Fixed the `replyEl` reference bug in `scripts/ui/chatView.js` so assistant replies hydrate correctly instead of throwing `ReferenceError: replyEl is not defined`.
-- Resolved `resolveArgReferences` destructuring typo in `scripts/tools/planExecutor.js`, ensuring sandbox plans retain their `args.code` payload instead of tripping the `js.run_sandbox 需要 code 字串` guard.
-- Added the `math.aggregate` registry entry + sanitizer so tool plans can sum/avg/min/max series (e.g., sandbox interest arrays) without more custom JS.
-- Updated the sandbox runner + plan executor to keep structured results available for `$tool.alias.result.*` lookups, log `[guard] auto save_as=…` whenever aliases are inferred, and normalize tool results so top-level placeholders hydrate correctly.
-- Layered in the Progress HUD + chat/composer polish (HTML/CSS/JS) so UX now shows live execution status, active tool, and a cleaner log that matches the user ask.
-- Built `state/memoryStore.js`, wired `callGeminiApi()` to feed in previous intent/plan/history, and exposed a Clear Memory control so users can reset IndexedDB state on demand.
-- Added the collapsible Agent Insights panel (HTML/CSS + `insightsPanel` module) so telemetry can stay hidden when the operator needs maximum chat space.
-- Ensured the chat textarea no longer loses focus mid-run; only the send button is disabled while `isAgentBusy` is true.
-- Patched `createNamedResultRecord()` so even tools without a native `.result` object (clock, math aggregate, etc.) still expose one, preventing `unavailable` placeholders in replies.
+- Supports {{tool_result.*}} for the last tool and {{tool.<alias>.*}} for named results.
+- Result normalization hoists result.* to top‑level and also preserves a .result snapshot for flat payloads, so both {{tool_result.local}} and {{tool_result.result.local}} resolve.
+- Hydrator falls back to .result.* when a flattened property is missing, maintaining backward compatibility.
+- Tools that don’t naturally return a .result object are wrapped so .result always exists, preventing unavailable placeholders.
+
+## Sandbox & Tools
+
+- [scripts/tools/sandboxRunner.js](scripts/tools/sandboxRunner.js) runs untrusted code with no network/storage, frozen globals, deep‑cloned inputs, and stringifies only on cloning failure to keep structured results addressable.
+- Sandbox code snippet cap is 1000 characters.
+- [scripts/tools/mathAggregate.js](scripts/tools/mathAggregate.js) provides sum/avg/min/max for post‑processing arrays (often used after a sandbox step).
+- Tool registry exposes both sandbox and aggregate so plans can chain them safely.
+
+## State & Memory
+
+- IndexedDB‑backed memory captures recent turns (user input, restatement, reply, tool_plan).
+- When present, API calls inject previous_intent, last_tool_plan, and a short history string to let follow‑ups reuse parameters (e.g., same but 24 months).
+- Header provides Clear Memory to wipe the store; action is logged in the timeline.
+
+## Telemetry & UI Surfaces
+
+- turn.toolRuns captures tool, alias, raw/resolved args, start/end time, duration, status, and result or error; powers the Tool Details drawer and future telemetry.
+- Thinking Log emits plan, tool, log, guard, error, and decide markers; serves as a replayable timeline.
+- Tool Details auto‑expands for the active run while preserving prior runs.
+- Summary Bar stays in sync with collapsible panels; states mirrored via aria‑expanded.
+- [scripts/ui/insightsPanel.js](scripts/ui/insightsPanel.js) controls the visibility of the diagnostics stack (collapsed by default and persisted in localStorage).
+- Chat composer remains focusable during execution; only the send button is disabled while isAgentBusy is true.
+- [scripts/ui/progressHud.js](scripts/ui/progressHud.js) mirrors runner state (Listening → Executing step → Complete/Failed) with step count, active‑tool pill, and progress bar.
+
+## Guardrails & JSON Repair
+
+- [scripts/utils/jsonRepair.js](scripts/utils/jsonRepair.js) strips stray non‑ASCII glyphs outside quoted strings before applying comma/brace fixes to recover malformed JSON.
+- Result normalization ensures structured results remain available for $tool.alias.result.* dereferences.
+
+## Open TODOs
+
+- Manual QA: savings‑projection scenario (clock → sandbox → aggregate), zero‑deposit case, and forced failure (bad code/timeout).
+- Dark mode: introduce tokens and a UI toggle.
+
+## Notes for Future Maintainers
+
+- Keep modules ≤300–500 lines and focused on one responsibility; prefer small, composable functions and explicit exports.
+- Avoid hardcoding business logic into the agent; prefer contracts (tool registry, plan schema, placeholder conventions).
+- Update [README.md](README.md) when extending the tool contract or UI surfaces to keep onboarding cheap.
